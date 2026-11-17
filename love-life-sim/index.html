@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>心动人生 · 恋爱人生模拟</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 标题屏 -->
+  <div id="title-screen" class="overlay show">
+    <div class="title-card">
+      <div class="game-logo">心动人生</div>
+      <div class="game-sub">恋爱人生模拟 · 从相遇到来日方长</div>
+      <div class="title-desc">第一人称走上小镇街头，认识 TA、恋爱、结婚、生子，<br>陪孩子长大成人，跑完属于你的这一生。</div>
+      <div class="title-form">
+        <label>你的名字 <input id="player-name" type="text" maxlength="6" placeholder="阿哲" value="阿哲"></label>
+        <div class="gender-pick">
+          <button class="gender-btn sel" data-g="M">男主</button>
+          <button class="gender-btn" data-g="F">女主</button>
+        </div>
+      </div>
+      <button id="btn-start" class="big-btn">开 始 人 生</button>
+      <div class="title-tips">W/S 前进后退 · A/D 转向 · E 互动 · I 生涯 · M 地图 · H 帮助</div>
+    </div>
+  </div>
+
+  <!-- 游戏主界面 -->
+  <div id="game" class="hidden">
+    <canvas id="scene" width="480" height="270"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-left">
+        <span id="hud-date">第1年 1月1日 星期一</span>
+        <span id="hud-age">22岁</span>
+      </div>
+      <div class="hud-right">
+        <span class="stat" title="金钱">💰 <b id="hud-money"></b></span>
+        <span class="stat" title="体力">⚡ <b id="hud-energy"></b></span>
+        <span class="stat" title="心情">💗 <b id="hud-mood"></b></span>
+        <span class="stat" title="魅力">✨ <b id="hud-charm"></b></span>
+        <span class="stat" title="才华">📖 <b id="hud-talent"></b></span>
+        <span class="stat" title="职业">💼 <b id="hud-career"></b></span>
+      </div>
+    </div>
+    <div id="hud-bars">
+      <div class="bar"><i>体力</i><div class="track"><div id="bar-energy" class="fill"></div></div></div>
+      <div class="bar"><i>心情</i><div class="track"><div id="bar-mood" class="fill mood"></div></div></div>
+    </div>
+
+    <!-- 交互提示 -->
+    <div id="interact-tip" class="hidden"></div>
+
+    <!-- 通知 -->
+    <div id="notices"></div>
+
+    <!-- 对话面板 -->
+    <div id="dialog" class="panel hidden">
+      <div class="panel-head">
+        <span id="dlg-name"></span>
+        <span id="dlg-stage" class="tag"></span>
+        <div class="rel-wrap"><div id="dlg-relbar"><div id="dlg-relfill"></div></div><span id="dlg-relval"></span></div>
+        <button class="close-x" data-close="dialog">×</button>
+      </div>
+      <div id="dlg-text" class="dlg-text"></div>
+      <div id="dlg-opts" class="dlg-opts"></div>
+    </div>
+
+    <!-- 生涯面板 -->
+    <div id="status" class="panel hidden">
+      <div class="panel-head"><span>生涯 · 关系</span><button class="close-x" data-close="status">×</button></div>
+      <div id="status-body" class="panel-body"></div>
+    </div>
+
+    <!-- 地图面板 -->
+    <div id="map-panel" class="panel hidden">
+      <div class="panel-head"><span>小镇地图</span><button class="close-x" data-close="map-panel">×</button></div>
+      <div class="panel-body map-body">
+        <canvas id="minimap" width="128" height="128"></canvas>
+        <div class="map-legend">
+          <span><i style="background:#ff7aa8"></i>可结识的人</span>
+          <span><i style="background:#8ad5a0"></i>街坊</span>
+          <span><i style="background:#fff"></i>你</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 商店 -->
+    <div id="shop" class="panel hidden">
+      <div class="panel-head"><span>中央商场</span><button class="close-x" data-close="shop">×</button></div>
+      <div id="shop-body" class="panel-body"></div>
+    </div>
+
+    <!-- 帮助 -->
+    <div id="help" class="panel hidden">
+      <div class="panel-head"><span>玩法说明</span><button class="close-x" data-close="help">×</button></div>
+      <div class="panel-body help-body">
+        <h4>操作</h4>
+        <p>W/S 前进后退 · A/D 转向 · E 与眼前的人/设施互动 · I 生涯 · M 地图 · H 帮助 · ESC 菜单</p>
+        <h4>一天怎么过</h4>
+        <p>时间会流逝，23:00 必须休息。上班赚钱、图书馆涨才华、健身房涨魅力；商场买礼物，投其所好送人。</p>
+        <h4>恋爱路线</h4>
+        <p>聊天选对话题（TA 的兴趣加成最高，可找李姐打听）→ 好感 40 可约会 → 好感 70 + 约会 3 次可表白 → 恋人后好感 90 + 戒指可求婚 → 婚后可以要孩子。</p>
+        <h4>养育路线</h4>
+        <p>孩子出生后，在 TA 满岁数时会出现「成长抉择」，选择陪伴方式塑造 TA 的智力/情商/体质/快乐；18 岁那年，TA 会走向属于自己的社会。</p>
+        <h4>小提醒</h4>
+        <p>心情低落会削弱一切社交效果；3 天不联系好感会降温；夫妻感情需要经营。祝你幸福。</p>
+      </div>
+    </div>
+
+    <!-- 暂停菜单 -->
+    <div id="pause" class="overlay hidden">
+      <div class="title-card small">
+        <div class="game-logo sm">暂停中</div>
+        <div class="pause-btns">
+          <button class="big-btn" data-close="pause">继续人生</button>
+          <button class="big-btn ghost" id="btn-save">保存进度</button>
+          <button class="big-btn ghost" id="btn-load">读取进度</button>
+          <button class="big-btn ghost" id="btn-mute">音效：开</button>
+          <button class="big-btn ghost" id="btn-restart">重新来过</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通用 cutscene overlay（婚礼/怀孕/分娩/睡觉过渡） -->
+    <div id="cutscene" class="overlay hidden">
+      <div class="cutscene-card">
+        <div id="cutscene-title"></div>
+        <div id="cutscene-text"></div>
+        <div id="cutscene-input" class="hidden">
+          <input id="baby-name-input" type="text" maxlength="4" placeholder="小名，如：豆豆">
+        </div>
+        <button id="cutscene-btn" class="big-btn">继续</button>
+      </div>
+    </div>
+
+    <!-- 约会 -->
+    <div id="date" class="overlay hidden">
+      <div class="cutscene-card date-card">
+        <div id="date-title"></div>
+        <div id="date-text" class="date-text"></div>
+        <div id="date-opts"></div>
+      </div>
+    </div>
+
+    <!-- 育儿回合 -->
+    <div id="parenting" class="overlay hidden">
+      <div class="cutscene-card parenting-card">
+        <div id="pt-title"></div>
+        <div class="pt-stats" id="pt-stats"></div>
+        <div id="pt-event" class="pt-event"></div>
+        <div id="pt-actions"></div>
+        <div class="pt-foot"><span id="pt-picked"></span><button id="pt-confirm" class="big-btn">就这样陪伴</button></div>
+      </div>
+    </div>
+
+    <!-- 结局 -->
+    <div id="ending" class="overlay hidden">
+      <div class="cutscene-card ending-card">
+        <div class="ending-flag" id="end-title"></div>
+        <div id="end-score"></div>
+        <div id="end-lines"></div>
+        <div class="ending-timeline-head">—— 你的一生 ——</div>
+        <div id="end-timeline"></div>
+        <button id="btn-again" class="big-btn">再来一世</button>
+      </div>
+    </div>
+
+    <!-- 开发者面板 -->
+    <div id="dev" class="hidden">
+      <div class="dev-head">DEV <button id="dev-toggle">_</button></div>
+      <div id="dev-body"></div>
+    </div>
+
+    <div id="zone-banner" class="hidden"></div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/core.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
