@@ -228,6 +228,7 @@ function startGame(name, gender) {
   G.player.traits = pickedTraits.slice();
   buildWorld();
   window.__playerStyle = PLAYER_STYLES[gender];
+  window.__playerGender = gender;
   Render.init3D(scene);
   Render.buildWorld3D(world, D);
   player = { x: 5.5, y: 6.5 };
@@ -276,6 +277,7 @@ function loop(t) {
       x: nl.x, y: nl.y,
       yaw: (nl.tx !== nl.x || nl.ty !== nl.y) ? Math.atan2(nl.ty - nl.y, nl.tx - nl.x) : cam.a,
       moving: nl.moving, walkT: nl.walkT || 0, waving: nl.waving,
+      expr: nl.expr || 'normal',
       showName: d < 4.2,
     });
   }
@@ -379,6 +381,10 @@ function updateNpcs(dt) {
     if (nl.waving != null && nl.waving !== false) {
       nl.waving -= dt;
       if (nl.waving <= 0) nl.waving = false;
+    }
+    if (nl.exprT != null && nl.exprT > 0) {
+      nl.exprT -= dt;
+      if (nl.exprT <= 0) nl.expr = null;
     }
     nl.waitT -= dt;
     if (nl.waitT > 0) { nl.moving = false; continue; }
@@ -718,10 +724,16 @@ function advRenderTopics() {
   advRenderOptions(list, true);
 }
 
+function setNpcExpr(id, expr, secs) {
+  const nl = world.npcLive.find(n => n.id === id);
+  if (nl) { nl.expr = expr; nl.exprT = secs || 4; }
+}
+
 function doChat(topic) {
   const r = C.interactChat(G, curNpc.id, topic);
   if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); return; }
   advRelBar();
+  setNpcExpr(curNpc.id, r.special ? 'happy' : 'normal', 4);
   const script = C.buildScript('chat', r, curNpc.npc.name);
   if (r.delta > 0 && script.length) script[script.length - 1].text += `（好感 +${r.delta}）`;
   playScript(script, () => advRenderTopics());
@@ -748,6 +760,7 @@ function doRomanticUI(kind) {
   const r = C.doRomantic(G, curNpc.id, kind);
   if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); advRenderHome(); return; }
   advRelBar();
+  setNpcExpr(curNpc.id, 'shy', 5);
   const expr = kind === 'holdhands' ? 'shy' : 'happy';
   const script = [
     { speaker: curNpc.npc.name, expr, text: r.text },
@@ -793,8 +806,9 @@ function doConfess() {
   if (r.success) {
     petalsOn(7000);
     sfx.love();
+    setNpcExpr(curNpc.id, 'shy', 8);
     notify(`你和${curNpc.name}在一起了！`, 'good');
-  } else sfx.bad();
+  } else { sfx.bad(); setNpcExpr(curNpc.id, 'sad', 6); }
   advRelBar();
   playScript([{ speaker: curNpc.npc.name, expr: C.exprForEvent('confess', r.success), text: r.text }], () => advRenderHome());
 }

@@ -385,7 +385,7 @@ function buildWorld3D(world, D) {
 
   // NPC 3D 模型
   for (const nl of world.npcLive) {
-    const g = makePerson3D(nl.npc.style);
+    const g = makePerson3D(nl.npc.style, nl.npc.gender);
     g.userData.nameSprite = makeNameSprite(nl.name);
     g.add(g.userData.nameSprite);
     g.userData.nameSprite.position.y = 0.85;
@@ -393,7 +393,7 @@ function buildWorld3D(world, D) {
     npcGroups.set(nl.id, g);
   }
   // 玩家模型（第三人称显示）
-  playerGroup = makePerson3D(window.__playerStyle);
+  playerGroup = makePerson3D(window.__playerStyle, window.__playerGender);
   playerGroup.visible = false;
   scene.add(playerGroup);
 }
@@ -421,71 +421,179 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// ---------- 3D 人物（Sims 风格小人，肢体动画） ----------
-function makePerson3D(style) {
+// ---------- 3D 人物（精细建模：五官 + 表情 + 身形） ----------
+// 部件几何/材质缓存（共享，降低创建开销）
+const P_CACHE = {};
+function pgeo(key, make) { if (!P_CACHE[key]) P_CACHE[key] = make(); return P_CACHE[key]; }
+function pmat(key, color) {
+  const k = key + color;
+  if (!P_CACHE[k]) P_CACHE[k] = new THREE.MeshLambertMaterial({ color: new THREE.Color(color) });
+  return P_CACHE[k];
+}
+
+function makePerson3D(style, gender) {
   const g = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({ color: new THREE.Color(style.skin) });
-  const top = new THREE.MeshLambertMaterial({ color: new THREE.Color(style.top) });
-  const bottom = new THREE.MeshLambertMaterial({ color: new THREE.Color(style.bottom) });
-  const hairM = new THREE.MeshLambertMaterial({ color: new THREE.Color(style.hair) });
+  const skin = pmat('skin', style.skin);
+  const skinD = pmat('skinD', mixCss(style.skin, [40, 18, 0], 0.25));
+  const top = pmat('top', style.top);
+  const bottom = pmat('bottom', style.bottom);
+  const hairM = pmat('hair', style.hair);
+  const hairD = pmat('hairD', mixCss(style.hair, [0, 0, 0], 0.3));
   function part(geo, mat, x, y, z) {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x, y, z);
     m.castShadow = true;
     return m;
   }
+
+  // ===== 头部组（含五官与表情部件） =====
+  const head = new THREE.Group();
+  head.position.y = 0.585;
+  // 圆润蛋形头
+  const skull = part(pgeo('skull', () => new THREE.SphereGeometry(0.085, 18, 14)), skin, 0, 0, 0);
+  skull.scale.set(1, 1.08, 0.95);
+  head.add(skull);
+  // 耳朵
+  head.add(part(pgeo('ear', () => new THREE.SphereGeometry(0.022, 8, 6)), skin, -0.086, 0, 0));
+  head.add(part(pgeo('ear', () => new THREE.SphereGeometry(0.022, 8, 6)), skin, 0.086, 0, 0));
+  // 眼睛（眼白+虹膜+瞳孔高光+睫毛）
+  function eye(sx) {
+    const e = new THREE.Group();
+    e.position.set(0.032 * sx, 0.005, 0.068);
+    const white = part(pgeo('eyeW', () => new THREE.SphereGeometry(0.0155, 10, 8)), pmat('eyeW', '#ffffff'), 0, 0, 0);
+    white.scale.set(1, 1, 0.55);
+    const iris = part(pgeo('iris', () => new THREE.SphereGeometry(0.0095, 8, 8)), pmat('iris', '#5a6a9a'), 0, 0, 0.006);
+    iris.scale.set(1, 1, 0.5);
+    const glint = part(pgeo('glint', () => new THREE.SphereGeometry(0.003, 6, 6)), pmat('glint', '#ffffff'), -0.003 * sx, 0.004, 0.011);
+    const lash = part(pgeo('lash', () => new THREE.BoxGeometry(0.032, 0.0035, 0.004)), pmat('lash', '#3a3340'), 0, 0.014, 0.003);
+    e.add(white); e.add(iris); e.add(glint); e.add(lash);
+    return e;
+  }
+  const eyeL = eye(-1), eyeR = eye(1);
+  head.add(eyeL); head.add(eyeR);
+  // 眉毛
+  const browL = part(pgeo('brow', () => new THREE.BoxGeometry(0.03, 0.0045, 0.004)), hairD, -0.032, 0.052, 0.072);
+  const browR = part(pgeo('brow', () => new THREE.BoxGeometry(0.03, 0.0045, 0.004)), hairD, 0.032, 0.052, 0.072);
+  head.add(browL); head.add(browR);
+  // 鼻子
+  head.add(part(pgeo('nose', () => new THREE.BoxGeometry(0.009, 0.015, 0.012)), skinD, 0, -0.012, 0.08));
+  // 嘴（三种状态）
+  const mouthSmile = new THREE.Mesh(pgeo('smile', () => new THREE.TorusGeometry(0.013, 0.0028, 6, 10, Math.PI)), pmat('mouth', '#c4707a'));
+  mouthSmile.rotation.z = Math.PI; mouthSmile.position.set(0, -0.032, 0.074);
+  const mouthOpen = part(pgeo('open', () => new THREE.SphereGeometry(0.009, 8, 6)), pmat('mouthIn', '#a05560'), 0, -0.034, 0.072);
+  mouthOpen.scale.set(1.2, 0.75, 0.45);
+  const mouthSad = new THREE.Mesh(pgeo('sad', () => new THREE.TorusGeometry(0.012, 0.0026, 6, 10, Math.PI)), pmat('mouth', '#c4707a'));
+  mouthSad.position.set(0, -0.026, 0.074);
+  head.add(mouthSmile); head.add(mouthOpen); head.add(mouthSad);
+  // 腮红
+  const blushL = new THREE.Mesh(pgeo('blush', () => new THREE.CircleGeometry(0.013, 10)), pmat('blush', 'rgba(245,150,150,.55)'));
+  blushL.position.set(-0.052, -0.018, 0.066); blushL.rotation.y = -0.35;
+  const blushR = new THREE.Mesh(pgeo('blush', () => new THREE.CircleGeometry(0.013, 10)), pmat('blush', 'rgba(245,150,150,.55)'));
+  blushR.position.set(0.052, -0.018, 0.066); blushR.rotation.y = 0.35;
+  head.add(blushL); head.add(blushR);
+
+  // ===== 发型（圆润版） =====
+  const hairCap = part(pgeo('hcap', () => new THREE.SphereGeometry(0.09, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2)), hairM, 0, 0.004, -0.004);
+  hairCap.scale.set(1.02, 1.1, 1);
+  head.add(hairCap);
+  // 刘海
+  head.add(part(pgeo('bang', () => new THREE.BoxGeometry(0.13, 0.028, 0.02)), hairM, 0, 0.052, 0.058));
+  const hs = style.hairStyle;
+  if (hs === 'long') {
+    const back = part(pgeo('hlong', () => new THREE.SphereGeometry(0.088, 14, 12)), hairM, 0, -0.09, -0.012);
+    back.scale.set(1, 1.9, 0.85);
+    head.add(back);
+    head.add(part(pgeo('hside', () => new THREE.SphereGeometry(0.026, 8, 8)), hairM, -0.082, -0.03, 0.03));
+    head.add(part(pgeo('hside', () => new THREE.SphereGeometry(0.026, 8, 8)), hairM, 0.082, -0.03, 0.03));
+  } else if (hs === 'ponytail') {
+    const pt = part(pgeo('hpt1', () => new THREE.SphereGeometry(0.024, 8, 8)), hairM, 0, -0.02, -0.09);
+    head.add(pt);
+    head.add(part(pgeo('hpt2', () => new THREE.SphereGeometry(0.02, 8, 8)), hairM, 0, -0.07, -0.1));
+    head.add(part(pgeo('hpt3', () => new THREE.SphereGeometry(0.015, 8, 8)), hairM, 0, -0.11, -0.095));
+  } else if (hs === 'bob') {
+    const back = part(pgeo('hbob', () => new THREE.SphereGeometry(0.089, 14, 12)), hairM, 0, -0.035, -0.01);
+    back.scale.set(1, 1.35, 0.9);
+    head.add(back);
+  } else if (hs === 'cap') {
+    head.add(part(pgeo('capbrim', () => new THREE.CylinderGeometry(0.105, 0.105, 0.01, 14)), hairD, 0, 0.052, 0.03));
+    head.add(part(pgeo('capband', () => new THREE.BoxGeometry(0.16, 0.012, 0.024)), hairD, 0, 0.058, 0.062));
+  } else {   // short
+    head.add(part(pgeo('hshort', () => new THREE.SphereGeometry(0.089, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.62)), hairM, 0, 0.002, -0.004));
+  }
+  g.add(head);
+
+  // ===== 身体 =====
+  // 脖子
+  g.add(part(pgeo('neck', () => new THREE.CylinderGeometry(0.028, 0.034, 0.06, 8)), skin, 0, 0.485, 0));
+  // 躯干两段（肩背 + 腰身）
+  g.add(part(pgeo('torsoU', () => new THREE.BoxGeometry(0.22, 0.15, 0.125)), top, 0, 0.4, 0));
+  g.add(part(pgeo('torsoL', () => new THREE.BoxGeometry(0.195, 0.12, 0.115)), top, 0, 0.275, 0));
+  // 领口
+  g.add(part(pgeo('collar', () => new THREE.BoxGeometry(0.09, 0.02, 0.02)), skin, 0, 0.465, 0.055));
   // 腿（髋部 pivot）
-  const legGeo = new THREE.BoxGeometry(0.07, 0.24, 0.07);
+  const legGeo = pgeo('leg', () => new THREE.BoxGeometry(0.07, 0.24, 0.07));
   const legL = new THREE.Group(), legR = new THREE.Group();
   legL.add(part(legGeo, bottom, 0, -0.12, 0));
   legR.add(part(legGeo, bottom, 0, -0.12, 0));
-  legL.position.set(-0.05, 0.24, 0); legR.position.set(0.05, 0.24, 0);
-  // 鞋
-  legL.add(part(new THREE.BoxGeometry(0.08, 0.05, 0.12), new THREE.MeshLambertMaterial({ color: 0x2b2b30 }), 0, -0.24, 0.02));
-  legR.add(part(new THREE.BoxGeometry(0.08, 0.05, 0.12), new THREE.MeshLambertMaterial({ color: 0x2b2b30 }), 0, -0.24, 0.02));
+  legL.add(part(pgeo('shoe', () => new THREE.BoxGeometry(0.08, 0.05, 0.12)), pmat('shoe', 0x2b2b30), 0, -0.24, 0.02));
+  legR.add(part(pgeo('shoe', () => new THREE.BoxGeometry(0.08, 0.05, 0.12)), pmat('shoe', 0x2b2b30), 0, -0.24, 0.02));
+  legL.position.set(-0.05, 0.22, 0); legR.position.set(0.05, 0.22, 0);
   g.add(legL); g.add(legR);
-  // 躯干
-  g.add(part(new THREE.BoxGeometry(0.22, 0.26, 0.13), top, 0, 0.37, 0));
-  // 手臂（肩部 pivot）
-  const armGeo = new THREE.BoxGeometry(0.055, 0.24, 0.055);
+  // 女性裙摆
+  if (gender === 'F') {
+    const skirt = new THREE.Mesh(pgeo('skirt', () => new THREE.CylinderGeometry(0.105, 0.155, 0.12, 12)), bottom);
+    skirt.position.set(0, 0.215, 0); skirt.castShadow = true;
+    g.add(skirt);
+  }
+  // 手臂（肩部 pivot + 球形手）
+  const armGeo = pgeo('arm', () => new THREE.BoxGeometry(0.055, 0.24, 0.055));
   const armL = new THREE.Group(), armR = new THREE.Group();
   armL.add(part(armGeo, top, 0, -0.1, 0));
   armR.add(part(armGeo, top, 0, -0.1, 0));
-  armL.add(part(new THREE.BoxGeometry(0.055, 0.05, 0.055), skin, 0, -0.22, 0));
-  armR.add(part(new THREE.BoxGeometry(0.055, 0.05, 0.055), skin, 0, -0.22, 0));
-  armL.position.set(-0.14, 0.47, 0); armR.position.set(0.14, 0.47, 0);
+  armL.add(part(pgeo('hand', () => new THREE.SphereGeometry(0.021, 8, 6)), skin, 0, -0.225, 0));
+  armR.add(part(pgeo('hand', () => new THREE.SphereGeometry(0.021, 8, 6)), skin, 0, -0.225, 0));
+  armL.position.set(-0.135, 0.465, 0); armR.position.set(0.135, 0.465, 0);
   g.add(armL); g.add(armR);
-  // 头 + 发 + 眼睛（面朝 +Z）
-  g.add(part(new THREE.BoxGeometry(0.16, 0.17, 0.15), skin, 0, 0.58, 0));
-  const eyeM = new THREE.MeshBasicMaterial({ color: 0x2b2b33 });
-  g.add(part(new THREE.BoxGeometry(0.025, 0.03, 0.01), eyeM, -0.04, 0.6, 0.076));
-  g.add(part(new THREE.BoxGeometry(0.025, 0.03, 0.01), eyeM, 0.04, 0.6, 0.076));
-  // 发型
-  const hs = style.hairStyle;
-  g.add(part(new THREE.BoxGeometry(0.17, 0.06, 0.16), hairM, 0, 0.675, -0.005));
-  g.add(part(new THREE.BoxGeometry(0.17, 0.1, 0.02), hairM, 0, 0.62, -0.075));
-  if (hs === 'long') {
-    g.add(part(new THREE.BoxGeometry(0.045, 0.34, 0.14), hairM, -0.09, 0.45, -0.01));
-    g.add(part(new THREE.BoxGeometry(0.045, 0.34, 0.14), hairM, 0.09, 0.45, -0.01));
-    g.add(part(new THREE.BoxGeometry(0.15, 0.05, 0.02), hairM, 0, 0.56, 0.078));
-  } else if (hs === 'ponytail') {
-    g.add(part(new THREE.BoxGeometry(0.07, 0.28, 0.07), hairM, 0, 0.5, -0.1));
-  } else if (hs === 'bob') {
-    g.add(part(new THREE.BoxGeometry(0.045, 0.2, 0.14), hairM, -0.09, 0.55, -0.01));
-    g.add(part(new THREE.BoxGeometry(0.045, 0.2, 0.14), hairM, 0.09, 0.55, -0.01));
-  } else if (hs === 'cap') {
-    g.add(part(new THREE.BoxGeometry(0.18, 0.03, 0.2), hairM, 0, 0.66, 0.03));
-  } else {
-    g.add(part(new THREE.BoxGeometry(0.045, 0.12, 0.12), hairM, -0.085, 0.6, -0.02));
-    g.add(part(new THREE.BoxGeometry(0.045, 0.12, 0.12), hairM, 0.085, 0.6, -0.02));
-  }
-  g.userData.legL = legL; g.userData.legR = legR;
-  g.userData.armL = armL; g.userData.armR = armR;
-  g.userData.walkT = 0;
+
+  g.userData = {
+    legL, legR, armL, armR, head,
+    eyeL, eyeR, browL, browR,
+    mouthSmile, mouthOpen, mouthSad, blushL, blushR,
+    walkT: 0,
+  };
+  applyExpr(g, 'normal');
   return g;
 }
+function mixCss(hex, rgb2, t) {
+  const c1 = hex2rgb(hex);
+  const m = mixRGB(c1, rgb2, t);
+  return rgbCss(m);
+}
 
-// 同步人物动画：state = {x, y, yaw, moving, walkT, waving}
+// 表情：normal | happy | shy | sad
+function applyExpr(g, expr) {
+  const u = g.userData;
+  if (!u.mouthSmile) return;
+  const happy = expr === 'happy', shy = expr === 'shy', sad = expr === 'sad';
+  // 眼睛：开心眯眼、害羞半垂
+  const sy = happy ? 0.35 : shy ? 0.62 : 1;
+  u.eyeL.scale.y = sy; u.eyeR.scale.y = sy;
+  // 眉毛：难过时八字
+  u.browL.rotation.z = sad ? -0.45 : 0;
+  u.browR.rotation.z = sad ? 0.45 : 0;
+  u.browL.position.y = sad ? 0.046 : 0.052;
+  u.browR.position.y = sad ? 0.058 : 0.052;
+  // 嘴型切换
+  u.mouthSmile.visible = !happy && !sad;
+  u.mouthOpen.visible = happy;
+  u.mouthSad.visible = sad;
+  // 腮红
+  u.blushL.visible = u.blushR.visible = (happy || shy);
+  // 头部姿态：害羞低头
+  u.head.rotation.x = shy ? 0.18 : 0;
+}
+
+// 同步人物动画：state = {x, y, yaw, moving, walkT, waving, expr}
 function syncPerson3D(g, st) {
   g.position.set(st.x, 0, st.y);
   g.rotation.y = Math.PI / 2 - st.yaw;
@@ -500,7 +608,9 @@ function syncPerson3D(g, st) {
     g.userData.armR.rotation.z = 0;
     g.userData.armR.rotation.x = w * 0.55;
   }
-  g.userData.legL.rotation.x = w * 0.7;
+  // 呼吸/走路轻微起伏
+  g.position.y = st.moving ? Math.abs(Math.sin(st.walkT * Math.PI)) * 0.012 : Math.sin((st.walkT || 0) * 0.8) * 0.002;
+  applyExpr(g, st.expr || 'normal');
   if (g.userData.nameSprite) {
     g.userData.nameSprite.visible = st.showName !== false;
   }
