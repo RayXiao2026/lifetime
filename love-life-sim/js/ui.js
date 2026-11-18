@@ -23,7 +23,7 @@ let muted = false;
 let running = false;
 
 const $ = id => document.getElementById(id);
-const scene = $('scene'), sctx = scene.getContext('2d');
+const scene = $('scene');   // 3D 渲染目标（WebGL，由 Render.init3D 接管）
 const minimap = $('minimap'), mctx = minimap.getContext('2d');
 
 // ---------- 音效 ----------
@@ -90,7 +90,6 @@ function buildWorld() {
     npcLive: D.NPCS.map(n => ({
       id: n.id, name: n.name, role: n.role, gender: n.gender, npc: n,
       x: 0, y: 0, tx: 0, ty: 0, waitT: Math.random() * 2, hidden: true, zone: null,
-      imgs: [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(n.style, f)),
       walkT: 0, moving: false, waving: false,
     })),
     childLive: null,
@@ -228,11 +227,10 @@ function startGame(name, gender) {
   G = C.createGame({ name, gender });
   G.player.traits = pickedTraits.slice();
   buildWorld();
+  window.__playerStyle = PLAYER_STYLES[gender];
+  Render.init3D(scene);
+  Render.buildWorld3D(world, D);
   player = { x: 5.5, y: 6.5 };
-  playerImgs = {
-    front: [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(PLAYER_STYLES[gender], f, 'front')),
-    back: [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(PLAYER_STYLES[gender], f, 'back')),
-  };
   cam = { x: 5.5, y: 6.5, a: Math.PI / 2, pitch: 0 };
   viewMode = 'first';
   lastZoneId = 'home'; lastDay = 0;
@@ -267,15 +265,31 @@ function loop(t) {
   // 相机（第三人称在玩家右肩后，遇墙/道具平滑收缩）
   const camPos = cameraPos(dt);
   cam.x = camPos.x; cam.y = camPos.y;
-  const pitch = (viewMode === 'third' ? -95 : 0) + cam.pitch;
-  const opts = {};
-  if (viewMode === 'third' && camDist > 0.75) {   // 距离过近不绘制玩家，避免贴脸糊屏
-    const frameIdx = movedThisFrame ? [0, 1, 0, 2][Math.floor(walkT) % 4] : 0;
-    const img = waving > 0 ? playerImgs.back[3] : playerImgs.back[frameIdx];   // 第三人称看背影
-    opts.playerSprite = { x: player.x, y: player.y, img };
+  // NPC 3D 同步（位置/朝向/走路摆动/挥手/名牌）
+  for (const nl of world.npcLive) {
+    const g = Render.npcGroups.get(nl.id);
+    if (!g) continue;
+    g.visible = !nl.hidden;
+    if (nl.hidden) continue;
+    const d = Math.hypot(nl.x - player.x, nl.y - player.y);
+    Render.syncPerson3D(g, {
+      x: nl.x, y: nl.y,
+      yaw: (nl.tx !== nl.x || nl.ty !== nl.y) ? Math.atan2(nl.ty - nl.y, nl.tx - nl.x) : cam.a,
+      moving: nl.moving, walkT: nl.walkT || 0, waving: nl.waving,
+      showName: d < 4.2,
+    });
   }
-  opts.pitch = pitch;
-  Render.renderScene(sctx, world, cam, G.minutes, opts);
+  // 玩家 3D 模型（第三人称显示，背面自然正确）
+  const pg = Render.playerGroup;
+  if (pg) {
+    pg.visible = viewMode === 'third' && camDist > 0.75;
+    if (pg.visible) {
+      Render.syncPerson3D(pg, { x: player.x, y: player.y, yaw: cam.a, moving: movedThisFrame, walkT, waving: waving > 0, showName: false });
+    }
+  }
+  // 孩子跟随名牌
+  if (world.childLive && Render.playerGroup) { /* 孩子由 childLive 简化展示：复用玩家模型逻辑省略 */ }
+  Render.frame3D({ x: cam.x, y: cam.y, a: cam.a, pitch: (cam.pitch || 0) * 0.011, mode: viewMode, dist: camDist, shoulder: camShoulder }, G.minutes);
   updateHud();
   updateInteractTip();
   requestAnimationFrame(loop);
