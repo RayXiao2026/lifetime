@@ -84,7 +84,85 @@ body {
 .close-x:hover { color: #fff; }
 .panel-body { padding: 12px 16px; overflow-y: auto; font-size: 13.5px; line-height: 1.7; }
 
-/* 对话 */
+/* ---------- ADV 对话（Galgame 演出层） ---------- */
+#adv { position: absolute; inset: 0; z-index: 40; pointer-events: none; }
+#adv.hidden { display: none !important; }
+#scene { transition: filter .35s ease; }
+body.adv-open #scene { filter: blur(4px) brightness(.6) saturate(.8); }
+
+#adv-portrait {
+  position: absolute; right: 6%; bottom: 24%; width: 300px; height: 425px;
+  pointer-events: none; animation: portraitIn .3s ease;
+  filter: drop-shadow(0 8px 24px rgba(0,0,0,.5));
+}
+@keyframes portraitIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+#adv-portrait-cv { width: 100%; height: 100%; image-rendering: pixelated; }
+
+#adv-plate {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 178px;
+  display: flex; align-items: center; gap: 12px; pointer-events: none;
+}
+.rel-wrap { display: flex; align-items: center; gap: 6px; }
+#adv-relbar { width: 140px; height: 8px; background: rgba(255,255,255,.15); border-radius: 4px; overflow: hidden; }
+#adv-relfill { height: 100%; width: 0; background: linear-gradient(90deg, #ff9ec4, #e05c8a); transition: width .4s; }
+#adv-relval { font-size: 11px; color: #e8dce8; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+
+#adv-box {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 26px;
+  width: min(92%, 760px); min-height: 118px; pointer-events: auto; cursor: pointer;
+  background: linear-gradient(180deg, rgba(10,8,18,.82), rgba(14,11,24,.92));
+  border: 1px solid rgba(224,92,138,.55); border-radius: 12px;
+  box-shadow: 0 6px 40px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(2px); padding: 18px 26px 14px;
+}
+#adv-name {
+  position: absolute; top: -14px; left: 22px;
+  background: linear-gradient(120deg, #e05c8a, #b45ce0); color: #fff;
+  font-size: 14px; letter-spacing: 2px; padding: 4px 18px; border-radius: 14px;
+  box-shadow: 0 3px 14px rgba(224,92,138,.4);
+}
+#adv-text { font-size: 15.5px; line-height: 1.9; color: #f2eaf4; min-height: 56px; white-space: pre-line; }
+#adv-cursor {
+  position: absolute; right: 16px; bottom: 8px; color: #ff9ec4; font-size: 12px;
+  animation: bob 1s infinite;
+}
+@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+
+#adv-opts {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 158px;
+  display: flex; flex-direction: column; gap: 8px; width: min(60%, 380px); pointer-events: auto;
+}
+#adv-opts button {
+  background: rgba(16,13,26,.85); color: #f0e8f2; border: 1px solid rgba(224,92,138,.5);
+  border-radius: 8px; padding: 9px 18px; font-size: 14px; cursor: pointer; text-align: left;
+  transition: all .15s; backdrop-filter: blur(2px);
+  animation: optIn .18s ease backwards;
+}
+#adv-opts button:nth-child(2) { animation-delay: .04s; } #adv-opts button:nth-child(3) { animation-delay: .08s; }
+#adv-opts button:nth-child(4) { animation-delay: .12s; } #adv-opts button:nth-child(5) { animation-delay: .16s; }
+#adv-opts button:nth-child(6) { animation-delay: .2s; } #adv-opts button:nth-child(7) { animation-delay: .24s; }
+@keyframes optIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+#adv-opts button:hover:not(:disabled) { background: rgba(224,92,138,.28); transform: translateX(4px); }
+#adv-opts button:disabled { opacity: .4; cursor: not-allowed; }
+#adv-opts button .hint { font-size: 11px; color: #8ad5a0; margin-left: 6px; }
+#adv-opts.grid { flex-direction: row; flex-wrap: wrap; width: min(80%, 560px); }
+#adv-opts.grid button { flex: 1 1 30%; text-align: center; }
+
+/* ---------- 樱花花瓣 ---------- */
+#petals { position: absolute; inset: 0; z-index: 45; overflow: hidden; pointer-events: none; display: none; }
+#petals.on { display: block; }
+.petal {
+  position: absolute; top: -20px; width: 10px; height: 10px;
+  background: radial-gradient(circle at 30% 30%, #ffd9e8, #ff9ec4);
+  border-radius: 10px 2px 10px 2px; opacity: .85;
+  animation: petalFall linear infinite;
+}
+@keyframes petalFall {
+  0% { transform: translateY(-3vh) translateX(0) rotate(0deg); }
+  100% { transform: translateY(105vh) translateX(14vw) rotate(340deg); }
+}
+
+/* ---------- 旧对话面板（保留结构兼容） ---------- */
 #dlg-name { color: #ffd9e8; font-size: 16px; }
 .tag {
   font-size: 11px; padding: 2px 8px; border-radius: 10px;
@@ -229,6 +307,7 @@ body {
 #pt-confirm { font-size: 13px; padding: 9px 22px; letter-spacing: 2px; }
 
 .ending-card { max-height: 88vh; overflow-y: auto; }
+#end-family { width: 360px; height: 170px; image-rendering: pixelated; margin: 0 auto 8px; border-radius: 8px; background: rgba(255,255,255,.03); }
 .ending-flag {
   font-size: 40px; font-weight: 800; letter-spacing: 8px; margin-bottom: 10px;
   background: linear-gradient(120deg, #ffd9e8, #e05c8a, #ffd54f);

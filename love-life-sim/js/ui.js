@@ -52,7 +52,7 @@ function notify(text, kind) {
 }
 
 // ---------- 面板管理 ----------
-const PANELS = ['dialog', 'status', 'map-panel', 'shop', 'help'];
+const PANELS = ['adv', 'status', 'map-panel', 'shop', 'help'];
 const OVERLAYS = ['pause', 'cutscene', 'date', 'parenting', 'ending'];
 function panelOpen() {
   return PANELS.some(p => !$(p).classList.contains('hidden')) || OVERLAYS.some(p => !$(p).classList.contains('hidden'));
@@ -147,7 +147,10 @@ window.addEventListener('keydown', e => {
     else toggleOverlay('pause');
   }
   if (OVERLAYS.some(o => !$(o).classList.contains('hidden'))) return; // overlay 中不响应世界快捷键
-  if (e.key.toLowerCase() === 'e') tryInteract();
+  if (e.key.toLowerCase() === 'e' && !e.repeat) {
+    if (!$('adv').classList.contains('hidden')) advanceAdv();
+    else tryInteract();
+  }
   if (e.key.toLowerCase() === 'i') { renderStatus(); togglePanel('status'); }
   if (e.key.toLowerCase() === 'm') { Render.renderMinimap(mctx, world, cam); togglePanel('map-panel'); }
   if (e.key.toLowerCase() === 'h') togglePanel('help');
@@ -380,28 +383,137 @@ function useStation(p) {
   }
 }
 
-// ---------- 对话 ----------
+// ---------- ADV 对话（Galgame 演出层） ----------
 let curNpc = null;
+let advQueue = [], advIdx = 0, advTyping = false, advTimer = null, advDone = null;
+
 function openDialog(nl) {
   curNpc = nl;
   closeAll();
-  $('dialog').classList.remove('hidden');
-  renderDialogHome();
+  $('adv').classList.remove('hidden');
+  document.body.classList.add('adv-open');
+  $('adv-name').textContent = nl.npc.name;
+  $('adv-stage').textContent = C.stageLabel(G, nl.id) + ' · ' + nl.npc.job;
+  advRelBar();
+  advPortrait('normal');
+  $('adv-opts').innerHTML = '';
+  const script = C.buildScript('greet', { stage: C.stageOf(G, nl.id) }, nl.npc.name);
+  playScript(script, () => advRenderHome());
   sfx.ui();
 }
-function relBarHtml(st) {
-  const rel = st.rel;
-  $('dlg-relfill').style.width = rel + '%';
-  $('dlg-relval').textContent = rel;
+
+function closeDialog() {
+  clearInterval(advTimer);
+  advTyping = false;
+  $('adv').classList.add('hidden');
+  document.body.classList.remove('adv-open');
 }
-function renderDialogHome() {
+
+function advPortrait(expr) {
+  const cv = $('adv-portrait-cv');
+  const p = Render.makePortrait(curNpc.npc.style, expr || 'normal');
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(p, 0, 0);
+}
+
+function advRelBar() {
+  const st = G.npcs[curNpc.id];
+  $('adv-relfill').style.width = st.rel + '%';
+  $('adv-relval').textContent = '好感 ' + st.rel;
+}
+
+function playScript(script, done) {
+  advQueue = script || []; advIdx = 0; advDone = done || null;
+  $('adv-opts').innerHTML = '';
+  nextLine();
+}
+
+function nextLine() {
+  if (advIdx >= advQueue.length) {
+    $('adv-cursor').style.display = 'none';
+    const cb = advDone; advDone = null;
+    if (cb) cb();
+    return;
+  }
+  const line = advQueue[advIdx++];
+  $('adv-name').textContent = line.speaker;
+  advPortrait(line.expr);
+  typeText($('adv-text'), line.text);
+}
+
+function typeText(el, text) {
+  clearInterval(advTimer);
+  el.textContent = '';
+  el.dataset.full = text;
+  let i = 0;
+  advTyping = true;
+  $('adv-cursor').style.display = 'none';
+  advTimer = setInterval(() => {
+    i++;
+    el.textContent = text.slice(0, i);
+    if (i % 4 === 0) beep(880, 0.015, 'square', 0.012);
+    if (i >= text.length) {
+      clearInterval(advTimer);
+      advTyping = false;
+      $('adv-cursor').style.display = '';
+    }
+  }, 26);
+}
+
+// E / 点击：未打完立即完成，打完则下一句
+function advanceAdv() {
+  if ($('adv').classList.contains('hidden')) return;
+  if (advTyping) {
+    clearInterval(advTimer);
+    $('adv-text').textContent = $('adv-text').dataset.full;
+    advTyping = false;
+    $('adv-cursor').style.display = '';
+    return;
+  }
+  if (advDone || advIdx < advQueue.length) nextLine();
+}
+$('adv-box').addEventListener('click', advanceAdv);
+
+// 樱花花瓣演出
+function petalsOn(ms) {
+  const box = $('petals');
+  box.innerHTML = '';
+  for (let i = 0; i < 18; i++) {
+    const p = document.createElement('span');
+    p.className = 'petal';
+    p.style.left = (Math.random() * 100) + '%';
+    p.style.animationDuration = (4 + Math.random() * 3) + 's';
+    p.style.animationDelay = (Math.random() * 2) + 's';
+    p.style.transform = 'scale(' + (0.7 + Math.random() * 0.7) + ')';
+    box.appendChild(p);
+  }
+  box.classList.add('on');
+  setTimeout(() => box.classList.remove('on'), ms || 6000);
+}
+
+// ---------- ADV 选项渲染 ----------
+function advRenderOptions(list, grid) {
+  const box = $('adv-opts');
+  box.innerHTML = '';
+  box.id = 'adv-opts';
+  box.className = grid ? 'grid' : '';
+  for (const o of list) {
+    const b = document.createElement('button');
+    b.innerHTML = o.label + (o.hint ? `<span class="hint">${o.hint}</span>` : '');
+    if (o.dis) b.disabled = true;
+    else b.addEventListener('click', o.fn);
+    box.appendChild(b);
+  }
+}
+
+function advRenderHome() {
   const nl = curNpc, st = G.npcs[nl.id], npc = nl.npc;
-  $('dlg-name').textContent = npc.name;
-  $('dlg-stage').textContent = C.stageLabel(G, nl.id) + ' · ' + npc.job;
-  relBarHtml(st);
-  $('dlg-text').textContent = npc.role === 'romance'
-    ? `${npc.name}（${npc.traits.join('·')}）站在你面前。`
-    : `${npc.name}（${npc.job}）冲你点了点头。`;
+  $('adv-stage').textContent = C.stageLabel(G, nl.id) + ' · ' + npc.job;
+  advRelBar();
+  $('adv-text').textContent = npc.role === 'romance'
+    ? `「${npc.traits.join('、')}」的${npc.job}。TA 正看着你，等你先开口。`
+    : `${npc.job}${npc.name}正望着街上来来往往的人。`;
   const opts = [];
   const btn = (label, fn, hint, dis) => opts.push({ label, fn, hint, dis });
 
@@ -409,12 +521,12 @@ function renderDialogHome() {
     if (npc.id === 'laowang') btn('听老王唠嗑', friendWang);
     if (npc.id === 'lijie') btn('找李姐打听消息', friendLijie);
     if (npc.id === 'xiaobei') btn('和小北吹牛', friendXiaobei);
-    if (npc.id === 'drzhang') btn('和张医生聊聊', () => { notify('张医生：身体是本钱，别老熬夜。', 'good'); closeDialog(); });
+    if (npc.id === 'drzhang') btn('和张医生聊聊', () => playScript([{ speaker: '张医生', expr: 'normal', text: '身体是本钱，别老熬夜。你这样挺好的，注意休息。' }], () => advRenderHome()));
   } else {
-    btn('闲聊', renderDialogTopics, '选对话题');
+    btn('闲聊', advRenderTopics, '选对话题');
     btn('夸赞 TA', doPraise);
     const hasGift = Object.keys(G.player.inv).some(k => G.player.inv[k] > 0);
-    btn('送礼', hasGift ? renderDialogGifts : null, hasGift ? '从背包挑选' : '背包空空（商场有卖）', !hasGift);
+    btn('送礼', hasGift ? advRenderGifts : null, hasGift ? '从背包挑选' : '背包空空（商场有卖）', !hasGift);
     const dateOk = C.askDate(G, nl.id);
     btn('邀约', startDateFlow, dateOk.ok ? null : dateOk.reason, !dateOk.ok);
     if (st.stage === 'stranger') {
@@ -429,75 +541,78 @@ function renderDialogHome() {
     }
   }
   btn('告别', closeDialog);
-  renderDlgOptions(opts);
+  advRenderOptions(opts);
 }
-function renderDlgOptions(list) {
-  const box = $('dlg-opts');
-  box.innerHTML = '';
-  for (const o of list) {
-    const b = document.createElement('button');
-    b.innerHTML = o.label + (o.hint ? `<span class="hint">${o.hint}</span>` : '');
-    if (o.dis) b.disabled = true;
-    else b.addEventListener('click', o.fn);
-    box.appendChild(b);
-  }
-}
-function closeDialog() { $('dialog').classList.add('hidden'); }
 
-function renderDialogTopics() {
+function advRenderTopics() {
   const nl = curNpc, st = G.npcs[nl.id];
-  $('dlg-text').textContent = '聊点什么好呢？' + (st.revealed ? '（李姐情报：TA 喜欢 ' + nl.npc.interests.map(t => D.TOPICS[t].name.slice(2)).join('、') + '）' : '');
+  $('adv-text').textContent = '聊点什么好呢？' + (st.revealed ? '（李姐情报：TA 喜欢 ' + nl.npc.interests.map(t => D.TOPICS[t].name.slice(2)).join('、') + '）' : '');
   const list = Object.keys(D.TOPICS).map(t => {
     const isRepeat = (st.recentTopics || []).indexOf(t) >= 0;
     const mark = (st.revealed && nl.npc.interests.indexOf(t) >= 0) ? ' ♥' : '';
     return { label: D.TOPICS[t].name + mark + (isRepeat ? '（刚聊过）' : ''), fn: () => doChat(t) };
   });
-  list.push({ label: '返回', fn: renderDialogHome });
-  renderDlgOptions(list);
+  list.push({ label: '返回', fn: advRenderHome });
+  advRenderOptions(list, true);
 }
+
 function doChat(topic) {
   const r = C.interactChat(G, curNpc.id, topic);
   if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); return; }
-  renderDialogTopics();
-  $('dlg-text').textContent = r.text + (r.delta > 0 ? `（好感 +${r.delta}）` : '');
-  relBarHtml(G.npcs[curNpc.id]);
+  advRelBar();
+  const script = C.buildScript('chat', r, curNpc.npc.name);
+  if (r.delta > 0 && script.length) script[script.length - 1].text += `（好感 +${r.delta}）`;
+  playScript(script, () => advRenderTopics());
   sfx.good();
 }
+
 function doPraise() {
   const r = C.interactPraise(G, curNpc.id);
   if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); return; }
-  $('dlg-text').textContent = r.text + `（好感 +${r.delta}）`;
-  relBarHtml(G.npcs[curNpc.id]);
+  advRelBar();
+  const script = C.buildScript('praise', r, curNpc.npc.name);
+  if (script.length) script[script.length - 1].text += `（好感 +${r.delta}）`;
+  playScript(script, () => advRenderHome());
   sfx.ui();
-  renderDialogHome();
 }
-function renderDialogGifts() {
+
+function advRenderGifts() {
   const list = Object.keys(D.GIFTS).filter(k => G.player.inv[k] > 0).map(k => ({
     label: `${D.GIFTS[k].name} ×${G.player.inv[k]}`, fn: () => doGift(k),
   }));
-  list.push({ label: '返回', fn: renderDialogHome });
-  $('dlg-text').textContent = '把心意送出去吧。';
-  renderDlgOptions(list);
+  list.push({ label: '返回', fn: advRenderHome });
+  $('adv-text').textContent = '把心意送出去吧。';
+  advRenderOptions(list);
 }
+
 function doGift(cat) {
   const r = C.giveGift(G, curNpc.id, cat);
-  renderDialogGifts();
-  $('dlg-text').textContent = r.text + `（好感 +${r.delta}）`;
-  relBarHtml(G.npcs[curNpc.id]);
+  advRelBar();
+  const script = C.buildScript('gift', r, curNpc.npc.name);
+  if (script.length) script[script.length - 1].text += `（好感 +${r.delta}）`;
+  playScript(script, () => {
+    const left = Object.keys(G.player.inv).some(k => G.player.inv[k] > 0);
+    if (left) advRenderGifts(); else advRenderHome();
+  });
   sfx.love();
 }
+
 function doConfess() {
   const r = C.confess(G, curNpc.id);
-  $('dlg-text').textContent = r.text;
-  if (r.success) { sfx.love(); notify(`你和${curNpc.name}在一起了！`, 'good'); }
-  else { sfx.bad(); notify('表白被婉拒了，再接再厉。', 'warn'); }
-  relBarHtml(G.npcs[curNpc.id]);
-  renderDialogHome();
+  if (r.success) {
+    petalsOn(7000);
+    sfx.love();
+    notify(`你和${curNpc.name}在一起了！`, 'good');
+  } else sfx.bad();
+  advRelBar();
+  playScript([{ speaker: curNpc.npc.name, expr: C.exprForEvent('confess', r.success), text: r.text }], () => advRenderHome());
 }
+
 function doPropose() {
   const r = C.propose(G, curNpc.id);
   if (r.accepted) {
     sfx.jingle();
+    petalsOn(9000);
     closeDialog();
     showCutscene('婚礼', r.text + `\n\n从此，${curNpc.name}会在家里等你。`, '成家了', () => {
       updateNpcZones();
@@ -505,10 +620,10 @@ function doPropose() {
     });
   } else {
     sfx.bad();
-    $('dlg-text').textContent = r.text;
-    renderDialogHome();
+    playScript([{ speaker: curNpc.npc.name, expr: 'sad', text: r.text }], () => advRenderHome());
   }
 }
+
 function doTryBaby() {
   const r = C.tryBaby(G);
   if (!r.ok) { notify(r.reason, 'warn'); return; }
@@ -520,26 +635,41 @@ function doTryBaby() {
 // 好友互动
 function friendWang() {
   const st = G.npcs.laowang;
-  if (st.lastBoonDay === G.day) { $('dlg-text').textContent = '老王：今儿聊够了，改天再来！'; return; }
+  if (st.lastBoonDay === G.day) {
+    playScript([{ speaker: '老王', expr: 'normal', text: '今儿聊够了，改天再来！' }], () => advRenderHome());
+    return;
+  }
   st.lastBoonDay = G.day;
   G.player.mood = Math.min(100, G.player.mood + 6);
-  const lines = ['老王：小伙子/姑娘，缘分这东西，得自己上街去找！', '老王：我跟你王阿姨当年，就是在公园长椅上认识的。', '老王：钱是挣不完的，人是会走散的，懂？'];
-  $('dlg-text').textContent = lines[Math.floor(Math.random() * lines.length)] + '（心情 +6）';
+  const lines = ['小伙子/姑娘，缘分这东西，得自己上街去找！', '我跟你王阿姨当年，就是在公园长椅上认识的。', '钱是挣不完的，人是会走散的，懂？'];
+  playScript([
+    { speaker: '老王', expr: 'happy', text: lines[Math.floor(Math.random() * lines.length)] },
+    { speaker: '老王', expr: 'normal', text: '（心情 +6）' },
+  ], () => advRenderHome());
   sfx.good();
 }
 function friendLijie() {
   const cands = C.candidates(G).filter(n => !G.npcs[n.id].revealed);
-  if (!cands.length) { $('dlg-text').textContent = '李姐：镇上的适龄青年我可都告诉你啦！'; return; }
+  if (!cands.length) {
+    playScript([{ speaker: '李姐', expr: 'happy', text: '镇上的适龄青年我可都告诉你啦！' }], () => advRenderHome());
+    return;
+  }
   const n = cands[Math.floor(Math.random() * cands.length)];
   G.npcs[n.id].revealed = true;
-  $('dlg-text').textContent = `李姐（压低声音）：${n.name}最喜欢${D.GIFTS[n.giftPref].name}，平时爱聊${n.interests.map(t => D.TOPICS[t].name.slice(2)).join('和')}。`;
+  playScript([
+    { speaker: '李姐', expr: 'happy', text: '（李姐左右看了看，把你拉到一边。）' },
+    { speaker: '李姐', expr: 'normal', text: `${n.name}最喜欢${D.GIFTS[n.giftPref].name}，平时爱聊${n.interests.map(t => D.TOPICS[t].name.slice(2)).join('和')}。` },
+  ], () => advRenderHome());
   notify(`情报更新：${n.name} 的喜好已解锁（I 查看关系）`, 'good');
   sfx.good();
 }
 function friendXiaobei() {
   G.player.mood = Math.min(100, G.player.mood + 3);
-  const tips = ['小北：找李姐能打听别人的喜好，事半功倍！', '小北：心情低落时聊天效果减半，先去吃点好的。', '小北：约会三次以上再表白，稳。', '小北：图书馆涨才华，升职加薪靠它。'];
-  $('dlg-text').textContent = tips[Math.floor(Math.random() * tips.length)] + '（心情 +3）';
+  const tips = ['找李姐能打听别人的喜好，事半功倍！', '心情低落时聊天效果减半，先去吃点好的。', '约会三次以上再表白，稳。', '图书馆涨才华，升职加薪靠它。'];
+  playScript([
+    { speaker: '小北', expr: 'happy', text: tips[Math.floor(Math.random() * tips.length)] },
+    { speaker: '小北', expr: 'normal', text: '（心情 +3）' },
+  ], () => advRenderHome());
   sfx.ui();
 }
 
@@ -676,10 +806,41 @@ function renderPtStats() {
 }
 
 // ---------- 结局 ----------
+const PLAYER_STYLES = {
+  M: { hair: '#2b2b33', hairStyle: 'short', skin: '#eecfa8', top: '#5d7fb5', bottom: '#333344' },
+  F: { hair: '#6a4a3a', hairStyle: 'long', skin: '#f2d5b8', top: '#e05c8a', bottom: '#3a3a55' },
+};
+function drawFamilyPortrait() {
+  const cv = $('end-family'), ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const members = [{ style: PLAYER_STYLES[G.player.gender], expr: 'happy' }];
+  if (G.spouseId) {
+    const sp = D.NPCS.find(n => n.id === G.spouseId);
+    members.push({ style: sp.style, expr: 'shy' });
+  }
+  if (G.child) {
+    const spStyle = G.spouseId ? D.NPCS.find(n => n.id === G.spouseId).style : PLAYER_STYLES[G.player.gender];
+    members.push({
+      style: { hair: spStyle.hair, hairStyle: 'short', skin: spStyle.skin, top: '#f2c94c', bottom: '#5c8ad5' },
+      expr: 'happy',
+    });
+  }
+  const n = members.length, w = 110;
+  members.forEach((m, i) => {
+    const p = Render.makePortrait(m.style, m.expr);
+    const x = (cv.width - n * w) / 2 + i * w;
+    ctx.drawImage(p, x, 10, 100, 142);
+    ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd9e8';
+    const name = i === 0 ? G.player.name : i === 1 ? D.NPCS.find(x2 => x2.id === G.spouseId).name : G.child.name;
+    ctx.fillText(name, x + 50, 164);
+  });
+}
 function openEnding() {
   G.ended = true;
   const e = C.evaluateEnding(G);
   sfx.jingle();
+  drawFamilyPortrait();
   $('end-title').textContent = e.title;
   $('end-score').textContent = `人生幸福指数 ${e.score} / 100 · ${G.player.name} 的故事`;
   $('end-lines').innerHTML = e.lines.map(l => `<p>${l}</p>`).join('') +

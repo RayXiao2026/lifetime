@@ -483,6 +483,44 @@ function eatFood(G, place) {
   return { ok: true, text: '在家随便吃了点，恢复了一点体力。' };
 }
 
+// ---------- Galgame 演出：表情与台词脚本 ----------
+// 事件 → 立绘表情
+function exprForEvent(type, ok) {
+  switch (type) {
+    case 'chat': return ok ? 'happy' : 'normal';
+    case 'praise': return ok ? 'shy' : 'normal';
+    case 'gift': return ok ? 'happy' : 'normal';
+    case 'confess': return ok ? 'shy' : 'sad';
+    case 'quarrel': return 'sad';
+    default: return 'normal';
+  }
+}
+
+// 操作结果 → 台词队列（打字机逐条播放）
+function buildScript(kind, r, npcName) {
+  const script = [];
+  const rng = (typeof r !== 'undefined' && r && r._rng) ? r._rng : Math.random;
+  const pick = arr => arr[Math.floor(rng() * arr.length)];
+  if (kind === 'greet') {
+    const stage = r && r.stage ? r.stage : 'stranger';
+    const lines = D().GREETINGS[stage] || D().GREETINGS.stranger;
+    script.push({ speaker: npcName, expr: stage === 'crush' || stage === 'lover' || stage === 'spouse' ? 'happy' : 'normal', text: pick(lines) });
+    return script;
+  }
+  if (!r) return script;
+  if (kind === 'chat') {
+    script.push({ speaker: npcName, expr: exprForEvent('chat', r.special), text: r.text });
+    script.push({ speaker: npcName, expr: r.special ? 'happy' : 'normal', text: pick(r.special ? D().CHAT_REACT.hit : D().CHAT_REACT.miss) });
+  } else if (kind === 'praise') {
+    script.push({ speaker: npcName, expr: exprForEvent('praise', r.delta >= 4), text: r.text });
+    if (r.delta >= 4) script.push({ speaker: npcName, expr: 'shy', text: pick(D().PRAISE_REACT.hit) });
+  } else if (kind === 'gift') {
+    script.push({ speaker: npcName, expr: exprForEvent('gift', r.delta >= 10), text: r.text });
+    script.push({ speaker: npcName, expr: r.delta >= 10 ? 'happy' : 'normal', text: pick(r.delta >= 10 ? D().GIFT_REACT.hit : D().GIFT_REACT.miss) });
+  }
+  return script;
+}
+
 const core = {
   mulberry32, createGame, logEvent, fmtDate, addMinutes, doSleep,
   scheduleZone, candidates, relOf, stageOf, stageLabel,
@@ -490,6 +528,7 @@ const core = {
   askDate, resolveDate, canConfess, confess, canPropose, propose,
   tryBaby, deliverBaby, childAgeYears, checkMilestone, applyParenting, evaluateEnding,
   doWork, canLevelUp, studyLibrary, gymTrain, eatFood,
+  exprForEvent, buildScript,
   YEAR_DAYS, START_AGE, MAX_AGE_DAYS,
 };
 

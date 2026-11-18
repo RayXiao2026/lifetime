@@ -116,6 +116,82 @@ function makePersonSprite(style) {
   return c;
 }
 
+// ---------- 立绘（Galgame 半身像，四表情） ----------
+// expr: normal | happy | shy | sad
+const portraitCache = {};
+function makePortrait(style, expr) {
+  const key = JSON.stringify(style) + '|' + expr;
+  if (portraitCache[key]) return portraitCache[key];
+  const W = 120, H = 170;
+  const c = makeCanvas(W, H), ctx = c.getContext('2d');
+  const { hair, hairStyle, skin, top, bottom } = style;
+  const blush = '#f5a3a3', dark = '#2b2b33';
+
+  // 肩与身体
+  px(ctx, 30, 128, 60, 42, top);
+  px(ctx, 24, 140, 12, 30, top); px(ctx, 84, 140, 12, 30, top);      // 肩袖
+  px(ctx, 52, 128, 16, 14, skin);                                      // 颈
+  px(ctx, 30, 128, 60, 6, 'rgba(255,255,255,.18)');
+  px(ctx, 48, 132, 24, 10, 'rgba(0,0,0,.12)');                         // 领口阴影
+  // 头（Q 版大头）
+  px(ctx, 34, 52, 52, 62, skin);
+  px(ctx, 38, 100, 44, 10, skin);                                      // 下巴
+  // 耳
+  px(ctx, 30, 78, 5, 10, skin); px(ctx, 85, 78, 5, 10, skin);
+
+  // 表情
+  const eyeY = 78;
+  if (expr === 'happy') {
+    // 弯月眼 ^ ^
+    for (let i = 0; i < 5; i++) { px(ctx, 44 + i, eyeY + (i < 2 ? i : (4 - i)), 1, 1, dark); px(ctx, 46 + i, eyeY + 1 + (i < 2 ? i : (4 - i)) - 1, 1, 1, dark); }
+    for (let i = 0; i < 5; i++) { px(ctx, 70 + i, eyeY + (i < 2 ? i : (4 - i)), 1, 1, dark); px(ctx, 72 + i, eyeY + 1 + (i < 2 ? i : (4 - i)) - 1, 1, 1, dark); }
+    px(ctx, 55, 100, 10, 7, '#c96a6a'); px(ctx, 56, 99, 8, 2, '#e88a8a');   // 张嘴笑
+    px(ctx, 40, 66, 8, 4, blush); px(ctx, 72, 66, 8, 4, blush);              // 腮红
+    px(ctx, 98, 46, 3, 3, '#ff9ec4'); px(ctx, 104, 56, 2, 2, '#ffd9e8');     // 音符点缀
+  } else if (expr === 'shy') {
+    px(ctx, 46, eyeY, 4, 3, dark); px(ctx, 70, eyeY, 4, 3, dark);            // 微垂眼
+    px(ctx, 44, eyeY - 5, 8, 2, hair); px(ctx, 68, eyeY - 5, 8, 2, hair);    // 低眉
+    px(ctx, 38, 88, 12, 6, blush); px(ctx, 70, 88, 12, 6, blush);            // 大腮红
+    px(ctx, 57, 101, 6, 2, '#c96a6a');                                       // 抿嘴
+    px(ctx, 16, 58, 3, 3, '#ff9ec4'); px(ctx, 12, 66, 2, 2, '#ffd9e8');      // 悸动点缀
+  } else if (expr === 'sad') {
+    px(ctx, 46, eyeY + 2, 4, 3, dark); px(ctx, 70, eyeY + 2, 4, 3, dark);
+    px(ctx, 43, eyeY - 6, 9, 2, dark); px(ctx, 68, eyeY - 4, 9, 2, dark);    // 八字眉
+    px(ctx, 55, 103, 10, 2, '#a05a5a');                                      // 向下嘴
+  } else {
+    px(ctx, 46, eyeY, 4, 5, dark); px(ctx, 70, eyeY, 4, 5, dark);
+    px(ctx, 47, eyeY, 2, 2, '#fff'); px(ctx, 71, eyeY, 2, 2, '#fff');        // 高光
+    px(ctx, 57, 101, 6, 2, '#c96a6a');
+  }
+
+  // 发型（放大版）
+  if (hairStyle === 'long') {
+    px(ctx, 32, 44, 56, 14, hair);
+    px(ctx, 30, 40, 60, 10, hair);
+    px(ctx, 28, 54, 8, 74, hair); px(ctx, 84, 54, 8, 74, hair);              // 垂发
+    px(ctx, 36, 30, 48, 14, hair);
+  } else if (hairStyle === 'short') {
+    px(ctx, 32, 42, 56, 16, hair);
+    px(ctx, 36, 32, 48, 12, hair);
+    px(ctx, 30, 50, 6, 12, hair); px(ctx, 84, 50, 6, 12, hair);
+  } else if (hairStyle === 'ponytail') {
+    px(ctx, 32, 42, 56, 16, hair);
+    px(ctx, 36, 32, 48, 12, hair);
+    px(ctx, 86, 50, 14, 56, hair); px(ctx, 88, 44, 10, 10, hair);            // 侧马尾
+    px(ctx, 90, 70, 4, 12, 'rgba(255,255,255,.15)');
+  } else if (hairStyle === 'bob') {
+    px(ctx, 32, 40, 56, 20, hair);
+    px(ctx, 36, 30, 48, 14, hair);
+    px(ctx, 28, 52, 8, 34, hair); px(ctx, 84, 52, 8, 34, hair);
+  } else if (hairStyle === 'cap') {
+    px(ctx, 34, 36, 52, 16, hair);
+    px(ctx, 28, 46, 64, 5, hair);                                            // 帽檐
+    px(ctx, 30, 41, 60, 4, 'rgba(0,0,0,.2)');
+  }
+  portraitCache[key] = c;
+  return c;
+}
+
 // ---------- 道具精灵 ----------
 function makePropSprite(type) {
   const map = {
@@ -341,7 +417,7 @@ function getPropImg(type) {
 }
 
 const Render = {
-  RENDER_W, RENDER_H, renderScene, renderMinimap, makePersonSprite, getPropImg, dayPalette,
+  RENDER_W, RENDER_H, renderScene, renderMinimap, makePersonSprite, makePortrait, getPropImg, dayPalette,
 };
 global.Render = Render;
 })(typeof window !== 'undefined' ? window : globalThis);

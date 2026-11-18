@@ -255,6 +255,52 @@ test('体力不足时动作被拦截', () => {
   assert(!r.ok, '体力不足应失败');
 });
 
+// ---------- Galgame 演出层 ----------
+test('台词库：话题台词每条≥3句', () => {
+  for (const k in DATA.TOPICS) {
+    assert(DATA.TOPICS[k].neutral.length >= 3, `话题 ${k} 台词不足3条`);
+    assert(DATA.TOPICS[k].name.length > 0, `话题 ${k} 缺名称`);
+  }
+});
+
+test('台词库：兴趣专属台词覆盖所有 NPC 兴趣', () => {
+  const used = new Set();
+  for (const n of DATA.NPCS) for (const i of n.interests) used.add(i);
+  for (const t of used) {
+    assert(DATA.INTEREST_LINES[t] && DATA.INTEREST_LINES[t].length >= 2, `兴趣 ${t} 缺专属台词`);
+  }
+});
+
+test('台词库：阶段问候覆盖 7 个关系阶段', () => {
+  const stages = ['stranger', 'acquaintance', 'friend', 'crush', 'closeFriend', 'lover', 'spouse'];
+  for (const s of stages) {
+    assert(Array.isArray(DATA.GREETINGS[s]) && DATA.GREETINGS[s].length >= 2, `阶段 ${s} 缺问候台词`);
+  }
+});
+
+test('表情映射：事件到立绘表情', () => {
+  assertEq(core.exprForEvent('chat', true), 'happy');
+  assertEq(core.exprForEvent('chat', false), 'normal');
+  assertEq(core.exprForEvent('praise', true), 'shy');
+  assertEq(core.exprForEvent('gift', true), 'happy');
+  assertEq(core.exprForEvent('gift', false), 'normal');
+  assertEq(core.exprForEvent('confess', true), 'shy');
+  assertEq(core.exprForEvent('confess', false), 'sad');
+  assertEq(core.exprForEvent('quarrel', false), 'sad');
+  assertEq(core.exprForEvent('other', true), 'normal');
+});
+
+test('对话脚本构建：聊天结果转台词序列', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.player.mood = 70;
+  const r = core.interactChat(G, 'linxiaoyu', 'reading');
+  const script = core.buildScript('chat', r, '林小雨');
+  assert(Array.isArray(script) && script.length >= 2, '应至少2条台词');
+  assert(script[0].speaker === '林小雨', '说话人应为NPC');
+  assert(script[0].expr === 'happy', '兴趣命中应为开心表情');
+  assert(script.every(s => typeof s.text === 'string' && s.text.length > 0), '台词非空');
+});
+
 // ---------- 汇总 ----------
 console.log(`\n结果：${passed} 通过，${failed} 失败`);
 process.exit(failed ? 1 : 0);

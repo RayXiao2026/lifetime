@@ -57,17 +57,23 @@
     <!-- 通知 -->
     <div id="notices"></div>
 
-    <!-- 对话面板 -->
-    <div id="dialog" class="panel hidden">
-      <div class="panel-head">
-        <span id="dlg-name"></span>
-        <span id="dlg-stage" class="tag"></span>
-        <div class="rel-wrap"><div id="dlg-relbar"><div id="dlg-relfill"></div></div><span id="dlg-relval"></span></div>
-        <button class="close-x" data-close="dialog">×</button>
+    <!-- ADV 对话（Galgame 演出层） -->
+    <div id="adv" class="hidden">
+      <div id="adv-portrait"><canvas id="adv-portrait-cv" width="120" height="170"></canvas></div>
+      <div id="adv-plate">
+        <span id="adv-stage" class="tag"></span>
+        <div class="rel-wrap"><div id="adv-relbar"><div id="adv-relfill"></div></div><span id="adv-relval"></span></div>
       </div>
-      <div id="dlg-text" class="dlg-text"></div>
-      <div id="dlg-opts" class="dlg-opts"></div>
+      <div id="adv-box">
+        <div id="adv-name"></div>
+        <div id="adv-text"></div>
+        <div id="adv-cursor">▼</div>
+      </div>
+      <div id="adv-opts"></div>
     </div>
+
+    <!-- 樱花花瓣演出层 -->
+    <div id="petals"></div>
 
     <!-- 生涯面板 -->
     <div id="status" class="panel hidden">
@@ -99,7 +105,7 @@
       <div class="panel-head"><span>玩法说明</span><button class="close-x" data-close="help">×</button></div>
       <div class="panel-body help-body">
         <h4>操作</h4>
-        <p>W/S 前进后退 · A/D 转向 · E 与眼前的人/设施互动 · I 生涯 · M 地图 · H 帮助 · ESC 菜单</p>
+        <p>W/S 前进后退 · A/D 转向 · E 与眼前的人/设施互动（对话中按 E 或点击推进） · I 生涯 · M 地图 · H 帮助 · ESC 菜单</p>
         <h4>一天怎么过</h4>
         <p>时间会流逝，23:00 必须休息。上班赚钱、图书馆涨才华、健身房涨魅力；商场买礼物，投其所好送人。</p>
         <h4>恋爱路线</h4>
@@ -161,6 +167,7 @@
     <div id="ending" class="overlay hidden">
       <div class="cutscene-card ending-card">
         <div class="ending-flag" id="end-title"></div>
+        <canvas id="end-family" width="360" height="170"></canvas>
         <div id="end-score"></div>
         <div id="end-lines"></div>
         <div class="ending-timeline-head">—— 你的一生 ——</div>
