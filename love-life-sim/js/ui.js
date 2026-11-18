@@ -233,6 +233,7 @@ function startGame(name, gender) {
   window.__playerStyle = PLAYER_STYLES[gender];
   window.__playerGender = gender;
   Render.init3D(scene);
+  Render.initSSR();                           // 屏幕空间反射（失败自动回退）
   Render.buildWorld3D(world, D);
   window.__worldMap = world.map;            // 球物理的墙检测
   Render.clearBalls();
@@ -1292,6 +1293,11 @@ $('btn-load').addEventListener('click', () => {
   notify('进度已读取。', 'good');
 });
 $('btn-mute').addEventListener('click', function () { muted = !muted; this.textContent = muted ? '音效：关' : '音效：开'; });
+$('btn-ssr').addEventListener('click', function () {
+  Render.setSSR(!Render.ssrOn);
+  this.textContent = Render.ssrOn ? '反射：开' : '反射：关';
+  notify(Render.ssrOn ? '屏幕空间反射已开启' : '屏幕空间反射已关闭（省电模式）', 'good');
+});
 $('btn-restart').addEventListener('click', () => location.reload());
 
 // ---------- 开发者 ----------

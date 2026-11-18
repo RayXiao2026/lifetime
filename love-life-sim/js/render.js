@@ -957,6 +957,99 @@ function wallAt3(x, y) {
   return !!(m[Math.floor(y)] && m[Math.floor(y)][Math.floor(x)]);
 }
 
+// ---------- SSR 屏幕空间反射（Ray-Tracing 风格，双 pass + 深度 RT） ----------
+let ssrRT = null, ssrScene = null, ssrCam = null, ssrMat = null, ssrEnabled = true;
+function initSSR() {
+  try {
+    const w = Math.floor(720 / 2), h = Math.floor(405 / 2);   // 半分辨率保性能
+    const depth = new THREE.DepthTexture(w, h);
+    depth.type = THREE.UnsignedShortType;
+    ssrRT = new THREE.WebGLRenderTarget(w, h, { depthTexture: depth, depthBuffer: true });
+    ssrCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    ssrScene = new THREE.Scene();
+    ssrMat = new THREE.ShaderMaterial({
+      uniforms: {
+        tColor: { value: ssrRT.texture },
+        tDepth: { value: depth },
+        uResolution: { value: new THREE.Vector2(w, h) },
+        uNear: { value: 0.05 }, uFar: { value: 80 },
+        uProj: { value: new THREE.Matrix4() },
+        uInvProj: { value: new THREE.Matrix4() },
+        uViewUp: { value: new THREE.Vector3(0, 1, 0) },
+        uStrength: { value: 0.85 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+        uniform sampler2D tColor; uniform sampler2D tDepth;
+        uniform vec2 uResolution; uniform float uNear, uFar, uStrength;
+        uniform mat4 uProj, uInvProj; uniform vec3 uViewUp;
+        // 交错梯度噪声（去条带）
+        float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+        // NDC 深度 → view space 距离（透视）
+        float depthToView(float d) {
+          float ndc = d * 2.0 - 1.0;
+          return (2.0 * uNear * uFar) / ((uFar + uNear) - ndc * (uFar - uNear));
+        }
+        vec3 viewPos(vec2 uv) {
+          float d = texture2D(tDepth, uv).x;
+          vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+          vec4 v = uInvProj * clip;
+          return v.xyz / v.w;
+        }
+        void main() {
+          vec4 base = texture2D(tColor, vUv);
+          vec3 vp = viewPos(vUv);
+          vec3 n = normalize(cross(dFdx(vp), dFdy(vp)));
+          vec3 rd = reflect(normalize(vp), n);
+          if (dot(rd, vec3(0.0, 0.0, -1.0)) <= 0.0) { gl_FragColor = base; return; }  // 射向相机后方
+          // 权重：地面（法线朝上）主导 + Fresnel 掠射增强
+          float upW = smoothstep(0.25, 0.85, dot(n, normalize(uViewUp)));
+          float fres = pow(1.0 - clamp(dot(-normalize(vp), n), 0.0, 1.0), 3.0);
+          float wBase = upW * 0.75 + fres * 0.35;
+          // 屏幕空间 ray march
+          vec3 p = vp + n * 0.02;
+          float t = 0.06 + ign(gl_FragCoord.xy) * 0.05;
+          vec3 hitCol = vec3(0.0); float hitW = 0.0;
+          for (int i = 0; i < 20; i++) {
+            t *= 1.38;
+            vec3 sp = p + rd * t;
+            vec4 cp = uProj * vec4(sp, 1.0);
+            vec2 suv = cp.xy / cp.w * 0.5 + 0.5;
+            if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) break;
+            float sceneZ = -depthToView(texture2D(tDepth, suv).x);
+            float dz = sp.z - sceneZ;
+            if (dz < -0.012 && dz > -0.9) {          // 命中：射线点在表面后方（厚度窗口）
+              float edge = smoothstep(0.0, 0.12, suv.x) * smoothstep(0.0, 0.12, 1.0 - suv.x)
+                         * smoothstep(0.0, 0.12, suv.y) * smoothstep(0.0, 0.12, 1.0 - suv.y);
+              float distF = 1.0 - clamp(t / 12.0, 0.0, 0.8);
+              hitCol = texture2D(tColor, suv).rgb;
+              hitW = edge * distF;
+              break;
+            }
+          }
+          if (hitW <= 0.0) { gl_FragColor = base; return; }
+          vec3 refl = hitCol;
+          float w = clamp(wBase * hitW * uStrength, 0.0, 0.85);
+          gl_FragColor = vec4(mix(base.rgb, refl * (0.85 + fres * 0.3), w), base.a);
+        }
+      `,
+      depthTest: false, depthWrite: false,
+    });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ssrMat);
+    quad.frustumCulled = false;
+    ssrScene.add(quad);
+  } catch (e) {
+    ssrEnabled = false;   // 深度纹理不可用则回退
+    ssrRT = null;
+  }
+}
+function setSSR(on) { ssrEnabled = on && !!ssrRT; }
+
 // ---------- 帧渲染 ----------
 // camOpts: {x, y, a, pitch(rad), mode:'first'|'third', dist, eyeH, thirdH, bob}
 function frame3D(camOpts, minutes) {
@@ -973,12 +1066,27 @@ function frame3D(camOpts, minutes) {
     camera3.position.set(eyeX, camOpts.thirdH || 1.45, eyeY);
     camera3.lookAt(camOpts.x + dirX * 0.6, (camOpts.eyeH || 0.56) - 0.08, camOpts.y + dirY * 0.6);
   }
-  renderer.render(scene, camera3);
+  camera3.updateMatrixWorld();
+  if (ssrEnabled && ssrRT && ssrMat) {
+    // Pass 1：场景渲到带深度的 RT
+    renderer.setRenderTarget(ssrRT);
+    renderer.render(scene, camera3);
+    // Pass 2：全屏 SSR 合成
+    ssrMat.uniforms.uProj.value.copy(camera3.projectionMatrix);
+    ssrMat.uniforms.uInvProj.value.copy(camera3.projectionMatrix).invert();
+    const up = new THREE.Vector3(0, 1, 0).transformDirection(camera3.matrixWorldInverse);
+    ssrMat.uniforms.uViewUp.value.copy(up);
+    renderer.setRenderTarget(null);
+    renderer.render(ssrScene, ssrCam);
+  } else {
+    renderer.render(scene, camera3);
+  }
 }
 
 const Render = {
   RENDER_W: 720, RENDER_H: 405,
-  init3D, buildWorld3D, frame3D, makePerson3D, syncPerson3D, setDaylight,
+  init3D, buildWorld3D, frame3D, makePerson3D, syncPerson3D, setDaylight, initSSR, setSSR,
+  get ssrOn() { return ssrEnabled; },
   addBall, clearBalls, updateBalls, spawnPuff, get balls() { return balls; },
   makePortrait, renderMinimap,
   get scene3D() { return scene; },
