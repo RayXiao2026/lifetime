@@ -525,45 +525,94 @@ function makePerson3D(style, gender) {
     return m;
   }
 
-  // ===== 头部组（含五官与表情部件） =====
+  // ===== 头部组（精修：眼窝/眼睑/睫毛/双层虹膜/鼻梁鼻翼/双唇露齿/下巴） =====
   const head = new THREE.Group();
   head.position.y = 0.585;
-  // 圆润蛋形头
-  const skull = part(pgeo('skull', () => new THREE.SphereGeometry(0.085, 18, 14)), skin, 0, 0, 0);
-  skull.scale.set(1, 1.08, 0.95);
+  head.scale.set(0.97, 1.06, 0.96);
+  // 颅骨 + 下巴
+  const skull = part(pgeo('skull', () => new THREE.SphereGeometry(0.085, 20, 16)), skin, 0, 0, 0);
+  skull.scale.set(1, 1.05, 0.95);
   head.add(skull);
-  // 耳朵
-  head.add(part(pgeo('ear', () => new THREE.SphereGeometry(0.022, 8, 6)), skin, -0.086, 0, 0));
-  head.add(part(pgeo('ear', () => new THREE.SphereGeometry(0.022, 8, 6)), skin, 0.086, 0, 0));
-  // 眼睛（眼白+虹膜+瞳孔高光+睫毛）
+  const chin = part(pgeo('chin', () => new THREE.SphereGeometry(0.024, 10, 8)), skin, 0, -0.068, 0.026);
+  chin.scale.set(1.05, 0.85, 0.9);
+  head.add(chin);
+  // 耳朵（带耳廓暗面）
+  head.add(part(pgeo('ear', () => new THREE.SphereGeometry(0.022, 8, 6)), skin, -0.085, -0.004, 0));
+  head.add(part(pgeo('ear', () => new THREE.SphereGeometry(0.022, 8, 6)), skin, 0.085, -0.004, 0));
+  head.add(part(pgeo('earIn', () => new THREE.SphereGeometry(0.011, 6, 5)), skinD, -0.089, -0.004, 0.004));
+  head.add(part(pgeo('earIn', () => new THREE.SphereGeometry(0.011, 6, 5)), skinD, 0.089, -0.004, 0.004));
+
+  // ---- 眼睛（杏仁形：眼窝 + 眼白 + 双层虹膜 + 瞳孔 + 双高光 + 上眼睑 + 睫毛线 + 下睑） ----
   function eye(sx) {
     const e = new THREE.Group();
-    e.position.set(0.032 * sx, 0.005, 0.068);
-    const white = part(pgeo('eyeW', () => new THREE.SphereGeometry(0.0155, 10, 8)), pmat('eyeW', '#ffffff'), 0, 0, 0);
-    white.scale.set(1, 1, 0.55);
-    const iris = part(pgeo('iris', () => new THREE.SphereGeometry(0.0095, 8, 8)), pmat('iris', '#5a6a9a'), 0, 0, 0.006);
-    iris.scale.set(1, 1, 0.5);
-    const glint = part(pgeo('glint', () => new THREE.SphereGeometry(0.003, 6, 6)), pmat('glint', '#ffffff'), -0.003 * sx, 0.004, 0.011);
-    const lash = part(pgeo('lash', () => new THREE.BoxGeometry(0.032, 0.0035, 0.004)), pmat('lash', '#3a3340'), 0, 0.014, 0.003);
-    e.add(white); e.add(iris); e.add(glint); e.add(lash);
+    e.position.set(0.031 * sx, 0.006, 0.06);
+    e.rotation.z = -0.1 * sx;   // 微斜杏仁
+    // 眼窝（暗色底）
+    const socket = part(pgeo('socket', () => new THREE.SphereGeometry(0.019, 10, 8)), skinD, 0, 0, -0.004);
+    socket.scale.set(1.18, 0.8, 0.45);
+    e.add(socket);
+    // 眼白（压扁球）
+    const white = part(pgeo('eyeW', () => new THREE.SphereGeometry(0.0142, 12, 10)), pmat('eyeW', '#f8f6f2'), 0, 0, 0.001);
+    white.scale.set(1.28, 1, 0.5);
+    e.add(white);
+    // 虹膜双层（外深内浅）+ 瞳孔
+    const irisOut = part(pgeo('irisO', () => new THREE.SphereGeometry(0.0088, 10, 8)), pmat('irisO', '#3d4c78'), 0, 0, 0.005);
+    irisOut.scale.set(1, 1, 0.42);
+    const irisIn = part(pgeo('irisI', () => new THREE.SphereGeometry(0.0062, 10, 8)), pmat('irisI', '#6a7fb5'), 0, 0, 0.0062);
+    irisIn.scale.set(1, 1, 0.4);
+    const pupil = part(pgeo('pupil', () => new THREE.SphereGeometry(0.0032, 8, 6)), pmat('pupil', '#141420'), 0, 0, 0.0075);
+    pupil.scale.set(1, 1, 0.35);
+    e.add(irisOut); e.add(irisIn); e.add(pupil);
+    // 双高光（主+副）
+    e.add(part(pgeo('glint', () => new THREE.SphereGeometry(0.0024, 6, 5)), pmat('glint', '#ffffff'), -0.0022 * sx, 0.0032, 0.0085));
+    e.add(part(pgeo('glint2', () => new THREE.SphereGeometry(0.0013, 6, 5)), pmat('glint', '#ffffff'), 0.0026 * sx, -0.0028, 0.008));
+    // 上眼睑（肤色薄盖）
+    const lid = part(pgeo('lid', () => new THREE.SphereGeometry(0.0155, 10, 8)), skin, 0, 0.0055, 0.0005);
+    lid.scale.set(1.32, 0.5, 0.52);
+    e.add(lid);
+    // 睫毛线 + 睫毛梢
+    e.add(part(pgeo('lash', () => new THREE.BoxGeometry(0.033, 0.0022, 0.002)), pmat('lash', '#2a2430'), 0, 0.0118, 0.0065));
+    const tip = part(pgeo('lashtip', () => new THREE.BoxGeometry(0.007, 0.0018, 0.0018)), pmat('lash', '#2a2430'), 0.014 * sx, 0.0128, 0.006);
+    tip.rotation.z = 0.5 * sx;
+    e.add(tip);
+    // 下睑线
+    e.add(part(pgeo('lowlid', () => new THREE.BoxGeometry(0.028, 0.0015, 0.0015)), pmat('lowlid', '#c9a898'), 0, -0.0112, 0.0045));
     return e;
   }
   const eyeL = eye(-1), eyeR = eye(1);
   head.add(eyeL); head.add(eyeR);
-  // 眉毛
-  const browL = part(pgeo('brow', () => new THREE.BoxGeometry(0.03, 0.0045, 0.004)), hairD, -0.032, 0.052, 0.072);
-  const browR = part(pgeo('brow', () => new THREE.BoxGeometry(0.03, 0.0045, 0.004)), hairD, 0.032, 0.052, 0.072);
-  head.add(browL); head.add(browR);
-  // 鼻子
-  head.add(part(pgeo('nose', () => new THREE.BoxGeometry(0.009, 0.015, 0.012)), skinD, 0, -0.012, 0.08));
-  // 嘴（三种状态）
-  const mouthSmile = new THREE.Mesh(pgeo('smile', () => new THREE.TorusGeometry(0.013, 0.0028, 6, 10, Math.PI)), pmat('mouth', '#c4707a'));
-  mouthSmile.rotation.z = Math.PI; mouthSmile.position.set(0, -0.032, 0.074);
-  const mouthOpen = part(pgeo('open', () => new THREE.SphereGeometry(0.009, 8, 6)), pmat('mouthIn', '#a05560'), 0, -0.034, 0.072);
-  mouthOpen.scale.set(1.2, 0.75, 0.45);
-  const mouthSad = new THREE.Mesh(pgeo('sad', () => new THREE.TorusGeometry(0.012, 0.0026, 6, 10, Math.PI)), pmat('mouth', '#c4707a'));
-  mouthSad.position.set(0, -0.026, 0.074);
-  head.add(mouthSmile); head.add(mouthOpen); head.add(mouthSad);
+  // 眉毛（两段带弧）
+  const browL = part(pgeo('browA', () => new THREE.BoxGeometry(0.02, 0.0042, 0.004)), hairD, -0.035, 0.05, 0.072);
+  const browL2 = part(pgeo('browB', () => new THREE.BoxGeometry(0.012, 0.0036, 0.0036)), hairD, -0.018, 0.048, 0.0735);
+  browL2.rotation.z = -0.25;
+  const browR = part(pgeo('browA', () => new THREE.BoxGeometry(0.02, 0.0042, 0.004)), hairD, 0.035, 0.05, 0.072);
+  const browR2 = part(pgeo('browB', () => new THREE.BoxGeometry(0.012, 0.0036, 0.0036)), hairD, 0.018, 0.048, 0.0735);
+  browR2.rotation.z = 0.25;
+  head.add(browL); head.add(browL2); head.add(browR); head.add(browR2);
+  // ---- 鼻（鼻梁 + 鼻头 + 鼻翼） ----
+  const bridge = part(pgeo('bridge', () => new THREE.BoxGeometry(0.007, 0.028, 0.009)), skin, 0, -0.008, 0.079);
+  bridge.rotation.x = 0.25;
+  head.add(bridge);
+  head.add(part(pgeo('noseTip', () => new THREE.SphereGeometry(0.0064, 8, 6)), skin, 0, -0.0205, 0.0815));
+  head.add(part(pgeo('noseWing', () => new THREE.SphereGeometry(0.0045, 6, 5)), skinD, -0.0062, -0.021, 0.0775));
+  head.add(part(pgeo('noseWing', () => new THREE.SphereGeometry(0.0045, 6, 5)), skinD, 0.0062, -0.021, 0.0775));
+  // ---- 嘴（上唇弧 + 下唇 + 张嘴露齿 + 难过弧） ----
+  const mouthSmile = new THREE.Mesh(pgeo('smile', () => new THREE.TorusGeometry(0.0125, 0.0024, 6, 12, Math.PI)), pmat('mouth', '#b56a72'));
+  mouthSmile.rotation.z = Math.PI; mouthSmile.position.set(0, -0.031, 0.0735);
+  mouthSmile.scale.set(1.1, 0.8, 1);
+  const upperLip = new THREE.Mesh(pgeo('ulip', () => new THREE.TorusGeometry(0.011, 0.0019, 6, 12, Math.PI * 0.9)), pmat('mouthD', '#9d5560'));
+  upperLip.rotation.z = Math.PI + 0.15; upperLip.position.set(0, -0.0265, 0.0735);
+  const lowerLip = part(pgeo('llip', () => new THREE.SphereGeometry(0.0068, 8, 6)), pmat('mouth', '#c4707a'), 0, -0.0385, 0.0735);
+  lowerLip.scale.set(1.6, 0.62, 0.5);
+  const mouthOpen = new THREE.Group();
+  mouthOpen.position.set(0, -0.033, 0.0725);
+  const oral = part(pgeo('oral', () => new THREE.SphereGeometry(0.0075, 8, 6)), pmat('oral', '#7a3540'), 0, 0, 0);
+  oral.scale.set(1.35, 1, 0.45);
+  const teeth = part(pgeo('teeth', () => new THREE.BoxGeometry(0.013, 0.0038, 0.0035)), pmat('teeth', '#f5f2ec'), 0, 0.0032, 0.0035);
+  mouthOpen.add(oral); mouthOpen.add(teeth);
+  const mouthSad = new THREE.Mesh(pgeo('sad', () => new THREE.TorusGeometry(0.0115, 0.0024, 6, 12, Math.PI)), pmat('mouth', '#b56a72'));
+  mouthSad.position.set(0, -0.0285, 0.0735);
+  head.add(mouthSmile); head.add(upperLip); head.add(lowerLip); head.add(mouthOpen); head.add(mouthSad);
   // 腮红
   const blushL = new THREE.Mesh(pgeo('blush', () => new THREE.CircleGeometry(0.013, 10)), pmat('blush', 'rgba(245,150,150,.55)'));
   blushL.position.set(-0.052, -0.018, 0.066); blushL.rotation.y = -0.35;
@@ -575,8 +624,16 @@ function makePerson3D(style, gender) {
   const hairCap = part(pgeo('hcap', () => new THREE.SphereGeometry(0.09, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2)), hairM, 0, 0.004, -0.004);
   hairCap.scale.set(1.02, 1.1, 1);
   head.add(hairCap);
-  // 刘海
+  // 刘海三层（主 + 左右斜片）+ 发顶高光
   head.add(part(pgeo('bang', () => new THREE.BoxGeometry(0.13, 0.028, 0.02)), hairM, 0, 0.052, 0.058));
+  const bangL = part(pgeo('bangS', () => new THREE.BoxGeometry(0.045, 0.026, 0.018)), hairM, -0.05, 0.044, 0.055);
+  bangL.rotation.z = 0.35; bangL.rotation.y = 0.25;
+  const bangR = part(pgeo('bangS', () => new THREE.BoxGeometry(0.045, 0.026, 0.018)), hairM, 0.05, 0.044, 0.055);
+  bangR.rotation.z = -0.35; bangR.rotation.y = -0.25;
+  head.add(bangL); head.add(bangR);
+  const hi = part(pgeo('hhi', () => new THREE.BoxGeometry(0.06, 0.004, 0.03)), pmat('hairHi', mixCss(style.hair, [255, 255, 255], 0.45)), -0.015, 0.094, -0.012);
+  hi.rotation.z = 0.2;
+  head.add(hi);
   const hs = style.hairStyle;
   const swayParts = [];
   if (hs === 'long') {
@@ -586,6 +643,14 @@ function makePerson3D(style, gender) {
     swayParts.push(back);
     head.add(part(pgeo('hside', () => new THREE.SphereGeometry(0.026, 8, 8)), hairM, -0.082, -0.03, 0.03));
     head.add(part(pgeo('hside', () => new THREE.SphereGeometry(0.026, 8, 8)), hairM, 0.082, -0.03, 0.03));
+    // 前侧发束（发梢渐细圆头）
+    const strandL = part(pgeo('strand', () => new THREE.BoxGeometry(0.015, 0.15, 0.011)), hairM, -0.077, -0.018, 0.046);
+    strandL.rotation.z = 0.12;
+    const strandR = part(pgeo('strand', () => new THREE.BoxGeometry(0.015, 0.15, 0.011)), hairM, 0.077, -0.018, 0.046);
+    strandR.rotation.z = -0.12;
+    head.add(strandL); head.add(strandR);
+    head.add(part(pgeo('strandTip', () => new THREE.SphereGeometry(0.0075, 6, 5)), hairM, -0.086, -0.092, 0.046));
+    head.add(part(pgeo('strandTip', () => new THREE.SphereGeometry(0.0075, 6, 5)), hairM, 0.086, -0.092, 0.046));
   } else if (hs === 'ponytail') {
     const pt = new THREE.Group();
     pt.position.set(0, -0.02, -0.09);
@@ -643,7 +708,7 @@ function makePerson3D(style, gender) {
   g.userData = {
     legL, legR, armL, armR, head,
     eyeL, eyeR, browL, browR,
-    mouthSmile, mouthOpen, mouthSad, blushL, blushR,
+    mouthSmile, mouthOpen, mouthSad, upperLip, lowerLip, blushL, blushR,
     swayParts, walkT: 0,
   };
   applyExpr(g, 'normal');
@@ -655,26 +720,27 @@ function mixCss(hex, rgb2, t) {
   return rgbCss(m);
 }
 
-// 表情：normal | happy | shy | sad
-function applyExpr(g, expr) {
+// 表情：normal | happy | shy | sad（st.talking 时嘴部开合说话）
+function applyExpr(g, expr, talking) {
   const u = g.userData;
   if (!u.mouthSmile) return;
   const happy = expr === 'happy', shy = expr === 'shy', sad = expr === 'sad';
-  // 眼睛：开心眯眼、害羞半垂
   const sy = happy ? 0.35 : shy ? 0.62 : 1;
   u.eyeL.scale.y = sy; u.eyeR.scale.y = sy;
-  // 眉毛：难过时八字
   u.browL.rotation.z = sad ? -0.45 : 0;
   u.browR.rotation.z = sad ? 0.45 : 0;
-  u.browL.position.y = sad ? 0.046 : 0.052;
-  u.browR.position.y = sad ? 0.058 : 0.052;
-  // 嘴型切换
-  u.mouthSmile.visible = !happy && !sad;
-  u.mouthOpen.visible = happy;
+  u.browL.position.y = sad ? 0.046 : 0.05;
+  u.browR.position.y = sad ? 0.058 : 0.05;
+  // 嘴型：说话时张嘴开合（正弦），覆盖表情静态嘴
+  const talkingNow = !!talking && !sad;
+  u.mouthSmile.visible = !happy && !sad && !talkingNow;
+  u.mouthOpen.visible = happy || talkingNow;
   u.mouthSad.visible = sad;
-  // 腮红
+  if (u.upperLip) {
+    u.upperLip.visible = !happy && !talkingNow;
+    u.lowerLip.visible = !happy && !talkingNow && !sad;
+  }
   u.blushL.visible = u.blushR.visible = (happy || shy);
-  // 头部姿态：害羞低头
   u.head.rotation.x = shy ? 0.18 : 0;
 }
 
@@ -754,7 +820,17 @@ function syncPerson3D(g, st) {
     u.swayA = (u.swayA || 0) + u.swayV * dt;
     for (const sp of u.swayParts) sp.rotation.x = Math.max(-0.6, Math.min(0.9, u.swayA));
   }
-  applyExpr(g, st.expr || 'normal');
+  applyExpr(g, st.expr || 'normal', st.talking);
+  // 说话嘴部开合动画（正弦幅度随语速）
+  if (st.talking && g.userData.mouthOpen) {
+    const t = g.userData.talkPhase || 0;
+    g.userData.mouthOpen.scale.y = 0.35 + Math.abs(Math.sin(t * 9)) * 0.85;
+    g.userData.mouthOpen.scale.x = 0.9 + Math.abs(Math.sin(t * 4.5)) * 0.15;
+    g.userData.talkPhase = t + (st.dt || 0.016);
+  } else {
+    g.userData.talkPhase = 0;
+    if (g.userData.mouthOpen) g.userData.mouthOpen.scale.y += (1 - g.userData.mouthOpen.scale.y) * 0.3;
+  }
   // 眨眼（随机间隔 2~5 秒，闭 0.12 秒；最后应用以覆盖表情的眯眼）
   if (u.eyeL) {
     u.blinkT = (u.blinkT === undefined ? 1 + Math.random() * 3 : u.blinkT) - dt;

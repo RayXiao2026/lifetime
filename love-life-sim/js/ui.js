@@ -285,7 +285,7 @@ function loop(t) {
       x: nl.x, y: nl.y,
       yaw: nl.faceYaw !== undefined ? nl.faceYaw : ((nl.tx !== nl.x || nl.ty !== nl.y) ? Math.atan2(nl.ty - nl.y, nl.tx - nl.x) : cam.a),
       moving: nl.moving, walkT: nl.walkT || 0, waving: nl.waving,
-      expr: nl.expr || 'normal',
+      expr: nl.expr || 'normal', talking: !!nl.talking,
       speed: nl.moving ? 0.55 : 0, dt,
       lookX: d < 3 ? player.x : undefined, lookY: d < 3 ? player.y : undefined,
       showName: d < 4.2,
@@ -673,6 +673,7 @@ let advQueue = [], advIdx = 0, advTyping = false, advTimer = null, advDone = nul
 
 function openDialog(nl) {
   curNpc = nl;
+  nl.talking = true;   // 对话中嘴部开合说话
   closeAll();
   $('adv').classList.remove('hidden');
   document.body.classList.add('adv-open');
@@ -689,6 +690,7 @@ function openDialog(nl) {
 function closeDialog() {
   clearInterval(advTimer);
   advTyping = false;
+  if (curNpc) curNpc.talking = false;
   $('adv').classList.add('hidden');
   document.body.classList.remove('adv-open');
 }
