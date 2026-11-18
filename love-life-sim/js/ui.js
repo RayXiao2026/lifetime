@@ -164,9 +164,10 @@ window.addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'h') togglePanel('help');
   if (e.key.toLowerCase() === 'v' && !e.repeat) {
     viewMode = viewMode === 'first' ? 'third' : 'first';
+    if (viewMode === 'third') camDist = 0.9;   // 起步距离，避免切换瞬间人物糊屏
     document.body.classList.toggle('first-person', viewMode === 'first');
     document.body.classList.toggle('third-person', viewMode === 'third');
-    notify(viewMode === 'third' ? '第三人称视角（能看到自己啦）' : '第一人称视角', 'good');
+    notify(viewMode === 'third' ? '第三人称视角（跟在身后看背影）' : '第一人称视角', 'good');
     sfx.ui();
   }
 });
@@ -211,7 +212,10 @@ function startGame(name, gender) {
   G = C.createGame({ name, gender });
   buildWorld();
   player = { x: 5.5, y: 6.5 };
-  playerImgs = [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(PLAYER_STYLES[gender], f));
+  playerImgs = {
+    front: [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(PLAYER_STYLES[gender], f, 'front')),
+    back: [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(PLAYER_STYLES[gender], f, 'back')),
+  };
   cam = { x: 5.5, y: 6.5, a: Math.PI / 2, pitch: 0 };
   viewMode = 'first';
   lastZoneId = 'home'; lastDay = 0;
@@ -248,9 +252,9 @@ function loop(t) {
   cam.x = camPos.x; cam.y = camPos.y;
   const pitch = (viewMode === 'third' ? -95 : 0) + cam.pitch;
   const opts = {};
-  if (viewMode === 'third') {
+  if (viewMode === 'third' && camDist > 0.75) {   // 距离过近不绘制玩家，避免贴脸糊屏
     const frameIdx = movedThisFrame ? [0, 1, 0, 2][Math.floor(walkT) % 4] : 0;
-    const img = waving > 0 ? playerImgs[3] : playerImgs[frameIdx];
+    const img = waving > 0 ? playerImgs.back[3] : playerImgs.back[frameIdx];   // 第三人称看背影
     opts.playerSprite = { x: player.x, y: player.y, img };
   }
   opts.pitch = pitch;
@@ -289,7 +293,8 @@ function updatePlayer(dt) {
   }
 }
 
-// 第三人称相机：右肩后越肩位（侧俯视），收缩检测含墙体与阻挡道具（树/长椅等），距离平滑防弹跳
+// 第三人称相机：右肩后越肩位（侧俯视）。
+// 从远到近找第一个不与墙/道具相交的位置；侧偏受阻时逐步收回；仍无安全位则退化为玩家视点，确保相机永不进入墙体。
 function wallAt(x, y) {
   return !!(world.map[Math.floor(y)] && world.map[Math.floor(y)][Math.floor(x)]);
 }
@@ -301,21 +306,26 @@ function camBlocked(x, y) {
   }
   return false;
 }
-let camDist = 0;   // 当前平滑距离
+let camDist = 0, camShoulder = 0;   // 当前平滑距离/侧偏
 function cameraPos(dt) {
-  if (viewMode === 'first') { camDist = 0; return { x: player.x, y: player.y }; }
+  if (viewMode === 'first') { camDist = 0; camShoulder = 0; return { x: player.x, y: player.y }; }
   const dirX = Math.cos(cam.a), dirY = Math.sin(cam.a);
   const rightX = -dirY, rightY = dirX;   // 玩家右侧
-  const SHOULDER = 0.38, MAXD = 2.0;
-  let target = MAXD;
-  for (let d = 0.3; d <= MAXD; d += 0.1) {
-    if (camBlocked(player.x - dirX * d + rightX * SHOULDER, player.y - dirY * d + rightY * SHOULDER)) {
-      target = Math.max(0.4, d - 0.35);
-      break;
+  const MAXD = 2.0, MAXS = 0.38;
+  let tDist = 0, tShoulder = 0, safe = false;
+  for (let s = MAXS; s >= 0.05; s -= 0.165) {
+    for (let d = MAXD; d >= 0.15; d -= 0.1) {
+      if (!camBlocked(player.x - dirX * d + rightX * s, player.y - dirY * d + rightY * s)) {
+        tDist = d; tShoulder = s; safe = true; break;
+      }
     }
+    if (safe && tDist > 0.6) break;   // 距离足够就不再收侧偏
   }
-  camDist = camDist + (target - camDist) * Math.min(1, (dt || 0.016) * 9);
-  return { x: player.x - dirX * camDist + rightX * SHOULDER, y: player.y - dirY * camDist + rightY * SHOULDER };
+  if (!safe) { tDist = 0; tShoulder = 0; }   // 兜底：相机贴玩家视点
+  const k = Math.min(1, (dt || 0.016) * 9);
+  camDist += (tDist - camDist) * k;
+  camShoulder += (tShoulder - camShoulder) * k;
+  return { x: player.x - dirX * camDist + rightX * camShoulder, y: player.y - dirY * camDist + rightY * camShoulder };
 }
 
 function blocked(x, y) {

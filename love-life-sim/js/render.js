@@ -138,17 +138,22 @@ function buildTextures() {
 
 // ---------- 人物精灵（真人比例 32×96，约4.5头身） ----------
 // frame: 0 站立 | 1 迈步A | 2 迈步B | 'wave' 挥手
-function makePersonSprite(style, frame) {
+// facing: 'front' 正面 | 'back' 背面（第三人称看玩家背影用）
+function makePersonSprite(style, frame, facing) {
   const W = 32, H = 96;
   const c = makeCanvas(W, H), ctx = c.getContext('2d');
   const { hair, hairStyle, skin, top, bottom } = style;
   const f = frame || 0;
+  const isBack = facing === 'back';
   const skinD = mixRGB(hex2rgb(skin), [20, 10, 0], 0.25);   // 肤色阴影
   const topD = mixRGB(hex2rgb(top), [0, 0, 20], 0.3);        // 衣物暗面
   const topRGB = hex2rgb(top), hairRGB = hex2rgb(hair), bottomRGB = hex2rgb(bottom);
   const css = (c1, a) => `rgba(${c1[0] | 0},${c1[1] | 0},${c1[2] | 0},${a})`;
   const rgb = c1 => `rgb(${c1[0] | 0},${c1[1] | 0},${c1[2] | 0})`;
   const skinCss = rgb(hex2rgb(skin)), skinDark = rgb(skinD);
+  const hairCss = rgb(hairRGB);
+  const hairD = rgb(mixRGB(hairRGB, [0, 0, 0], 0.3));
+  const hairL = rgb(mixRGB(hairRGB, [255, 255, 255], 0.22));
 
   // ---- 腿与鞋（迈步帧前后错位，膝盖折点） ----
   function leg(x, lift, back) {
@@ -168,8 +173,14 @@ function makePersonSprite(style, frame) {
   px(ctx, 9, 28, 4, 32, css(mixRGB(topRGB, [255, 255, 255], 0.18), 1)); // 受光面
   px(ctx, 19, 28, 4, 32, rgb(topD));              // 背光面
   px(ctx, 9, 57, 14, 3, rgb(topD));               // 下摆阴影
-  px(ctx, 14, 28, 4, 6, skinCss);                 // 领口 V
-  px(ctx, 14, 27, 4, 1, rgb(mixRGB(topRGB, [0, 0, 0], 0.35)));
+  if (isBack) {
+    px(ctx, 14, 28, 4, 4, skinCss);               // 后颈
+    px(ctx, 13, 31, 6, 2, rgb(mixRGB(topRGB, [0, 0, 0], 0.35)));  // 后领线
+    px(ctx, 11, 40, 3, 8, rgb(mixRGB(topRGB, [0, 0, 0], 0.18)));  // 背部中缝
+  } else {
+    px(ctx, 14, 28, 4, 6, skinCss);               // 领口 V
+    px(ctx, 14, 27, 4, 1, rgb(mixRGB(topRGB, [0, 0, 0], 0.35)));
+  }
   px(ctx, 9, 44, 14, 2, css(mixRGB(topRGB, [255, 255, 255], 0.12), 0.5)); // 衣褶
 
   // ---- 手臂（贴身/摆动/高举） ----
@@ -195,21 +206,44 @@ function makePersonSprite(style, frame) {
   // ---- 头颈 ----
   px(ctx, 14, 22, 4, 7, skinCss);                  // 颈
   px(ctx, 14, 27, 4, 2, skinDark);
-  px(ctx, 9, 6, 14, 17, skinCss);                  // 脸
+  px(ctx, 9, 6, 14, 17, skinCss);                  // 脸/后脑
   px(ctx, 9, 18, 14, 4, skinCss);                  // 下颌
   px(ctx, 9, 20, 2, 3, skinDark); px(ctx, 21, 20, 2, 3, skinDark); // 颊侧阴影
-  // 五官
-  px(ctx, 11, 12, 4, 3, '#ffffff'); px(ctx, 17, 12, 4, 3, '#ffffff');  // 眼白
-  px(ctx, 12, 12, 2, 3, '#3a3a48'); px(ctx, 18, 12, 2, 3, '#3a3a48');  // 瞳
-  px(ctx, 12, 12, 1, 1, '#fff'); px(ctx, 18, 12, 1, 1, '#fff');        // 高光
-  px(ctx, 11, 10, 4, 1, rgb(mixRGB(hairRGB, [0, 0, 0], 0.3)));         // 眉
-  px(ctx, 17, 10, 4, 1, rgb(mixRGB(hairRGB, [0, 0, 0], 0.3)));
-  px(ctx, 15, 16, 1, 2, skinDark);                 // 鼻影
-  px(ctx, 14, 19, 4, 1, '#c07a7a');                // 唇
+  if (!isBack) {
+    // 五官（正面）
+    px(ctx, 11, 12, 4, 3, '#ffffff'); px(ctx, 17, 12, 4, 3, '#ffffff');  // 眼白
+    px(ctx, 12, 12, 2, 3, '#3a3a48'); px(ctx, 18, 12, 2, 3, '#3a3a48');  // 瞳
+    px(ctx, 12, 12, 1, 1, '#fff'); px(ctx, 18, 12, 1, 1, '#fff');        // 高光
+    px(ctx, 11, 10, 4, 1, rgb(mixRGB(hairRGB, [0, 0, 0], 0.3)));         // 眉
+    px(ctx, 17, 10, 4, 1, rgb(mixRGB(hairRGB, [0, 0, 0], 0.3)));
+    px(ctx, 15, 16, 1, 2, skinDark);                 // 鼻影
+    px(ctx, 14, 19, 4, 1, '#c07a7a');                // 唇
+  }
 
   // ---- 发型 ----
-  const hairD = rgb(mixRGB(hairRGB, [0, 0, 0], 0.3));
-  const hairL = rgb(mixRGB(hairRGB, [255, 255, 255], 0.22));
+  if (isBack) {
+    // 背面视图：后脑全发 + 发旋
+    px(ctx, 9, 5, 14, 18, hairCss);
+    px(ctx, 9, 5, 14, 3, hairL);                     // 顶部受光
+    px(ctx, 9, 20, 2, 3, hairD); px(ctx, 21, 20, 2, 3, hairD);
+    px(ctx, 14, 8, 4, 4, hairL);                     // 发旋高光
+    px(ctx, 15, 9, 2, 2, hairD);
+    if (hairStyle === 'long') {
+      px(ctx, 7, 8, 3, 44, hairCss); px(ctx, 22, 8, 3, 44, hairCss);   // 垂发（背面更长）
+      px(ctx, 7, 8, 1, 44, hairD); px(ctx, 24, 8, 1, 44, hairD);
+      px(ctx, 11, 14, 10, 30, css(hairRGB, 0.35));                     // 背发披覆
+    } else if (hairStyle === 'ponytail') {
+      px(ctx, 11, 12, 10, 34, hairCss); px(ctx, 12, 14, 8, 28, hairD); // 背后马尾
+      px(ctx, 12, 44, 8, 3, hairL);
+    } else if (hairStyle === 'bob') {
+      px(ctx, 8, 8, 2, 16, hairCss); px(ctx, 22, 8, 2, 16, hairCss);
+    } else if (hairStyle === 'cap') {
+      px(ctx, 8, 4, 16, 8, hairCss);
+      px(ctx, 6, 10, 20, 3, rgb(mixRGB(hairRGB, [0, 0, 0], 0.4)));     // 帽檐（背面）
+      px(ctx, 13, 6, 6, 5, css(mixRGB(hairRGB, [255, 255, 255], 0.25), 1));
+    }
+    return c;   // 背面到此为止（无刘海）
+  }
   if (hairStyle === 'long') {
     px(ctx, 8, 4, 16, 10, rgb(hairRGB));
     px(ctx, 8, 4, 16, 3, hairL);                   // 顶部高光
@@ -537,7 +571,7 @@ function renderScene(ctx, world, cam, minutes, opts) {
     const screenX = (W / 2) * (1 + tx / ty) | 0;
     const h = Math.abs(H / ty) | 0;
     const sw = s.img.width, sh = s.img.height;
-    const spriteH = (h * 0.85) | 0;
+    const spriteH = Math.min((h * 0.85) | 0, (H * 1.15) | 0);   // 尺寸上限，防贴脸巨物
     const spriteW = (spriteH * sw / sh) | 0;
     const y0 = (horizon + (h >> 1) - spriteH) | 0;
     const x0 = (screenX - spriteW / 2) | 0;
