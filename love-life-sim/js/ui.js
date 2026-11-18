@@ -241,7 +241,7 @@ function loop(t) {
   // 相机（第三人称在玩家背后，遇墙收缩）
   const camPos = cameraPos();
   cam.x = camPos.x; cam.y = camPos.y;
-  const pitch = (viewMode === 'third' ? -52 : 0) + cam.pitch;
+  const pitch = (viewMode === 'third' ? -95 : 0) + cam.pitch;
   const opts = {};
   if (viewMode === 'third') {
     const frameIdx = movedThisFrame ? [0, 1, 0, 2][Math.floor(walkT) % 4] : 0;
@@ -284,18 +284,23 @@ function updatePlayer(dt) {
   }
 }
 
-// 第三人称相机：玩家背后，逐步检测墙体收缩距离
+// 第三人称相机：右肩后越肩位（侧俯视），逐步检测墙体收缩距离
 function wallAt(x, y) {
   return !!(world.map[Math.floor(y)] && world.map[Math.floor(y)][Math.floor(x)]);
 }
 function cameraPos() {
   if (viewMode === 'first') return { x: player.x, y: player.y };
   const dirX = Math.cos(cam.a), dirY = Math.sin(cam.a);
-  let dist = 1.7;
-  for (let d = 0.3; d <= 1.7; d += 0.1) {
-    if (wallAt(player.x - dirX * d, player.y - dirY * d)) { dist = Math.max(0.35, d - 0.35); break; }
+  const rightX = -dirY, rightY = dirX;   // 玩家右侧
+  const SHOULDER = 0.38, MAXD = 2.0;
+  let dist = MAXD;
+  for (let d = 0.3; d <= MAXD; d += 0.1) {
+    if (wallAt(player.x - dirX * d + rightX * SHOULDER, player.y - dirY * d + rightY * SHOULDER)) {
+      dist = Math.max(0.4, d - 0.35);
+      break;
+    }
   }
-  return { x: player.x - dirX * dist, y: player.y - dirY * dist };
+  return { x: player.x - dirX * dist + rightX * SHOULDER, y: player.y - dirY * dist + rightY * SHOULDER };
 }
 
 function blocked(x, y) {
