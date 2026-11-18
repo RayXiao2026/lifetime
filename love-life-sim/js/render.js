@@ -599,25 +599,31 @@ function applyExpr(g, expr) {
   u.head.rotation.x = shy ? 0.18 : 0;
 }
 
-// 同步人物动画：state = {x, y, yaw, moving, walkT, waving, expr, stance, airborne, squash}
-// stance: stand | crouch | prone；airborne 跳跃中；squash 落地压缩量(0-1)
+// 同步人物动画：state = {x, y, yaw, moving, walkT, waving, expr, stance, airborne, squash, stretch, speed, dt, lookX, lookY}
 function syncPerson3D(g, st) {
   const u = g.userData;
   const stance = st.stance || 'stand';
   const airborne = !!st.airborne;
-  // 位置：离地高度（跳跃/趴下）
+  const dt = st.dt || 0.016;
   const baseY = stance === 'prone' ? 0.09 : stance === 'crouch' ? 0.0 : 0;
   g.position.set(st.x, baseY + (st.h || 0), st.y);
-  g.rotation.y = Math.PI / 2 - st.yaw;
 
-  // 落地压缩（squash-and-stretch）
-  const squash = st.squash || 0;
-  const syq = 1 - squash * 0.28, sxq = 1 + squash * 0.18;
+  // 转身平滑（最短角度路径插值）
+  if (u.yawCur === undefined) u.yawCur = Math.PI / 2 - st.yaw;
+  let diff = (Math.PI / 2 - st.yaw) - u.yawCur;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  u.yawCur += diff * Math.min(1, dt * 10);
+  g.rotation.y = u.yawCur;
+
+  // 压缩/伸展（squash-and-stretch）
+  const squash = st.squash || 0, stretch = st.stretch || 0;
+  const syq = (1 - squash * 0.28) * (1 + stretch * 0.22), sxq = (1 + squash * 0.18) * (1 - stretch * 0.12);
   if (stance === 'prone') {
-    g.rotation.x = 1.42;                    // 趴下：身体贴地前倾
+    g.rotation.x = 1.42;
     g.scale.set(sxq, syq * 0.9, 1);
   } else if (stance === 'crouch') {
-    g.rotation.x = 0.18;                    // 下蹲：身体微前倾 + 整体压低
+    g.rotation.x = 0.18;
     g.scale.set(sxq * 1.02, syq * 0.68, 1);
   } else {
     g.rotation.x = 0;
@@ -626,20 +632,20 @@ function syncPerson3D(g, st) {
 
   // 肢体动画
   let w = st.moving ? Math.sin(st.walkT * Math.PI) : 0;
-  if (airborne) {                            // 跳跃：收腿张臂
+  if (airborne) {
     u.legL.rotation.x = 0.55; u.legR.rotation.x = -0.35;
     u.armL.rotation.x = -0.7; u.armR.rotation.x = -0.7;
     u.armL.rotation.z = 0.5; u.armR.rotation.z = -0.5;
-  } else if (stance === 'prone') {           // 趴下：四肢平伸划动（匍匐爬行）
+  } else if (stance === 'prone') {
     const crawl = st.moving ? Math.sin(st.walkT * Math.PI * 2) : 0;
     u.legL.rotation.x = 0.15 + crawl * 0.25; u.legR.rotation.x = 0.15 - crawl * 0.25;
     u.armL.rotation.x = -1.2 + crawl * 0.35; u.armR.rotation.x = -1.2 - crawl * 0.35;
     u.armL.rotation.z = 0.25; u.armR.rotation.z = -0.25;
-  } else if (stance === 'crouch') {          // 下蹲：屈膝小碎步
+  } else if (stance === 'crouch') {
     u.legL.rotation.x = 0.85 + w * 0.35; u.legR.rotation.x = 0.85 - w * 0.35;
     u.armL.rotation.x = -0.35 - w * 0.3; u.armR.rotation.x = -0.35 + w * 0.3;
     u.armL.rotation.z = 0.3; u.armR.rotation.z = -0.3;
-  } else {                                   // 站立行走
+  } else {
     u.legL.rotation.x = w * 0.7;
     u.legR.rotation.x = -w * 0.7;
     u.armL.rotation.x = -w * 0.55;
@@ -651,18 +657,40 @@ function syncPerson3D(g, st) {
       u.armR.rotation.z = 0;
       u.armR.rotation.x = w * 0.55;
     }
+    // 躯干走路摇摆（左右重心交替）
+    u.torsoU = u.torsoU || null;
+    g.rotation.z = w * 0.045;
   }
 
   // 呼吸/走路起伏
   if (!airborne && stance === 'stand') {
     g.position.y += st.moving ? Math.abs(Math.sin(st.walkT * Math.PI)) * 0.012 : Math.sin((st.walkT || 0) * 0.8) * 0.002;
   }
-  // 发/裙摆物理摆动（速度驱动 + 惯性后飘）
+  // 发/裙摆：弹簧-阻尼模型（跟随速度后飘 + 步频扰动，带过冲回摆）
   if (u.swayParts && u.swayParts.length) {
-    const sway = w * 0.16 + (st.moving ? 0.1 : 0) + Math.sin((st.walkT || 0) * 2.2) * 0.03;
-    for (const sp of u.swayParts) sp.rotation.x = sway;
+    const spd = Math.min(1, (st.speed || 0) / 3);
+    const target = spd * 0.22 + w * 0.1;
+    const K = 60, D = 8;   // 弹簧刚度 / 阻尼
+    u.swayV = (u.swayV || 0) + (target - (u.swayA || 0)) * K * dt - (u.swayV || 0) * D * dt;
+    u.swayA = (u.swayA || 0) + u.swayV * dt;
+    for (const sp of u.swayParts) sp.rotation.x = Math.max(-0.6, Math.min(0.9, u.swayA));
   }
   applyExpr(g, st.expr || 'normal');
+  // 眨眼（随机间隔 2~5 秒，闭 0.12 秒；最后应用以覆盖表情的眯眼）
+  if (u.eyeL) {
+    u.blinkT = (u.blinkT === undefined ? 1 + Math.random() * 3 : u.blinkT) - dt;
+    if (u.blinkT <= -0.12) u.blinkT = 2 + Math.random() * 3.5;
+    if (u.blinkT <= 0) { u.eyeL.scale.y = 0.08; u.eyeR.scale.y = 0.08; }
+    else u._exprSy = u.eyeL.scale.y;
+    // 眼球跟随：近距离看向目标（玩家）
+    if (st.lookX !== undefined && st.lookY !== undefined && u.blinkT > 0) {
+      const ang = Math.atan2(st.lookY - st.y, st.lookX - st.x) - st.yaw;
+      const rel = Math.sin(ang), fwd = Math.cos(ang);
+      if (fwd > 0.1) {
+        u.eyeL.position.x = -0.032 + rel * 0.006; u.eyeR.position.x = 0.032 + rel * 0.006;
+      }
+    }
+  }
   if (u.nameSprite) u.nameSprite.visible = st.showName !== false;
 }
 
@@ -685,6 +713,45 @@ function setDaylight(minutes) {
   scene.fog.color.setHex(fogC);
   renderer.setClearColor(fogC);
   for (const pl of lampLights) pl.intensity = lampI * 0.9;
+}
+
+// ---------- 粒子系统（落地扬尘 / 踢球火花） ----------
+const puffs = [];
+let puffTex = null;
+function getPuffTex() {
+  if (puffTex) return puffTex;
+  const c = makeCanvas(32, 32), ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(16, 16, 2, 16, 16, 15);
+  g.addColorStop(0, 'rgba(255,255,255,.85)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(16, 16, 15, 0, Math.PI * 2); ctx.fill();
+  puffTex = new THREE.CanvasTexture(c);
+  return puffTex;
+}
+function spawnPuff(x, y, h, n, color, spread) {
+  for (let i = 0; i < n; i++) {
+    const mat = new THREE.SpriteMaterial({ map: getPuffTex(), color: new THREE.Color(color || 0xcfc5b0), transparent: true, opacity: 0.8, depthWrite: false });
+    const sp = new THREE.Sprite(mat);
+    const a = Math.random() * Math.PI * 2, r = Math.random() * (spread || 0.25);
+    sp.position.set(x + Math.cos(a) * r, h, y + Math.sin(a) * r);
+    sp.scale.set(0.08, 0.08, 1);
+    scene.add(sp);
+    puffs.push({ sp, vx: Math.cos(a) * (0.3 + Math.random() * 0.5), vz: Math.sin(a) * (0.3 + Math.random() * 0.5), vy: 0.5 + Math.random() * 0.8, life: 0.55, age: 0 });
+  }
+}
+function updatePuffs(dt) {
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const p = puffs[i];
+    p.age += dt;
+    if (p.age >= p.life) { scene.remove(p.sp); p.sp.material.dispose(); puffs.splice(i, 1); continue; }
+    const k = p.age / p.life;
+    p.sp.position.x += p.vx * dt; p.sp.position.z += p.vz * dt; p.sp.position.y += p.vy * dt;
+    p.vy -= 1.2 * dt;
+    const s = 0.08 + k * 0.16;
+    p.sp.scale.set(s, s, 1);
+    p.sp.material.opacity = 0.8 * (1 - k);
+  }
 }
 
 // ---------- 可踢足球（重力/反弹/滚动/碰撞物理） ----------
@@ -719,13 +786,17 @@ function addBall(x, y) {
 function clearBalls() { for (const b of balls) scene.remove(b.mesh); balls.length = 0; }
 const GRAV_BALL = 9.5;
 function updateBalls(dt, player, world, npcs) {
-  for (const b of balls) {
+  for (let bi = 0; bi < balls.length; bi++) {
+    const b = balls[bi];
     // 重力与弹跳
     b.vh -= GRAV_BALL * dt;
     b.h += b.vh * dt;
     if (b.h <= 0) {
       b.h = 0;
-      if (b.vh < -0.9) { b.vh = -b.vh * 0.55; }     // 地面反弹衰减
+      if (b.vh < -0.9) {
+        b.vh = -b.vh * 0.55;
+        if (b.vh > 0.8) spawnPuff(b.x, b.y, 0.06, 3, 0xb0a890, 0.12);   // 落地小尘
+      }
       else b.vh = 0;
       // 滚动摩擦
       b.vx *= Math.pow(0.35, dt); b.vy *= Math.pow(0.35, dt);
@@ -733,17 +804,54 @@ function updateBalls(dt, player, world, npcs) {
       b.vx *= Math.pow(0.75, dt); b.vy *= Math.pow(0.75, dt);  // 空气阻力
     }
     const nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
-    // 墙反弹
-    if (wallAt3(nx, b.y)) b.vx = -b.vx * 0.6; else b.x = nx;
-    if (wallAt3(b.x, ny)) b.vy = -b.vy * 0.6; else b.y = ny;
-    // 玩家踢球（碰撞半径 + 玩家速度注入）
+    // 墙反弹（带轻微随机扰动）
+    if (wallAt3(nx, b.y)) { b.vx = -b.vx * 0.62 + (Math.random() - 0.5) * 0.3; spawnPuff(b.x, b.y, 0.1, 2, 0x9a9488, 0.08); }
+    else b.x = nx;
+    if (wallAt3(b.x, ny)) { b.vy = -b.vy * 0.62 + (Math.random() - 0.5) * 0.3; spawnPuff(b.x, b.y, 0.1, 2, 0x9a9488, 0.08); }
+    else b.y = ny;
+    // 道具碰撞（圆-圆推出 + 法线反弹）
+    if (world) for (const p of world.props) {
+      if (!p.blocking) continue;
+      const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy), R = 0.42 + 0.09;
+      if (d < R && d > 0.001) {
+        const nxn = dx / d, nyn = dy / d;
+        b.x = p.x + nxn * R; b.y = p.y + nyn * R;
+        const vn = b.vx * nxn + b.vy * nyn;
+        if (vn < 0) { b.vx -= 1.6 * vn * nxn; b.vy -= 1.6 * vn * nyn; }   // e=0.6 反弹
+        if (Math.hypot(b.vx, b.vy) > 1.2) spawnPuff(b.x, b.y, 0.12, 2, 0xa89f8d, 0.08);
+      }
+    }
+    // 球-球碰撞（等质量动量交换）
+    for (let bj = bi + 1; bj < balls.length; bj++) {
+      const o = balls[bj];
+      const dx = o.x - b.x, dy = o.y - b.y, d = Math.hypot(dx, dy);
+      if (d < 0.18 && d > 0.001) {
+        const nxn = dx / d, nyn = dy / d;
+        const rel = (b.vx - o.vx) * nxn + (b.vy - o.vy) * nyn;
+        if (rel > 0) {
+          const j = rel * 0.9;
+          b.vx -= j * nxn; b.vy -= j * nyn;
+          o.vx += j * nxn; o.vy += j * nyn;
+          spawnPuff((b.x + o.x) / 2, (b.y + o.y) / 2, 0.12, 4, 0xffffff, 0.08);
+        }
+        const push = (0.18 - d) / 2;
+        b.x -= nxn * push; b.y -= nyn * push;
+        o.x += nxn * push; o.y += nyn * push;
+      }
+    }
+    // 玩家踢球（碰撞半径 + 玩家速度注入 + 姿态差异）
     const dx = b.x - player.x, dy = b.y - player.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.28 && d > 0.001) {
-      const kick = 2.2 + Math.hypot(player.vx || 0, player.vy || 0) * 1.4 + (player.h > 0.05 ? 1.5 : 0);
+      const pSpd = Math.hypot(player.vx || 0, player.vy || 0);
+      let kick = 2.2 + pSpd * 1.4;
+      if (player.h > 0.05) kick += 1.8;                                  // 跳跃大力抽射
+      if (player.stance === 'crouch') kick *= 0.6;                       // 蹲姿轻拨
+      if (player.stance === 'prone') kick *= 0.25;                       // 趴下只能蹭
       b.vx = dx / d * kick + (player.vx || 0) * 0.6;
       b.vy = dy / d * kick + (player.vy || 0) * 0.6;
       if (b.h <= 0.02) b.vh = 2.2 + Math.random();
+      if (kick > 3) spawnPuff(b.x, b.y, 0.12, 6, 0xfff2c9, 0.15);        // 大力踢球火花
     }
     // NPC 轻推
     if (npcs) for (const nl of npcs) {
@@ -762,6 +870,7 @@ function updateBalls(dt, player, world, npcs) {
       b.mesh.rotation.y -= (b.vx * dt) / 0.09;
     }
   }
+  updatePuffs(dt);
 }
 function wallAt3(x, y) {
   const m = (typeof window !== 'undefined' && window.__worldMap) ? window.__worldMap : null;
@@ -791,7 +900,7 @@ function frame3D(camOpts, minutes) {
 const Render = {
   RENDER_W: 720, RENDER_H: 405,
   init3D, buildWorld3D, frame3D, makePerson3D, syncPerson3D, setDaylight,
-  addBall, clearBalls, updateBalls, get balls() { return balls; },
+  addBall, clearBalls, updateBalls, spawnPuff, get balls() { return balls; },
   makePortrait, renderMinimap,
   get scene3D() { return scene; },
   get npcGroups() { return npcGroups; },

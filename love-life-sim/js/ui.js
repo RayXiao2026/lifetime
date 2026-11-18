@@ -21,6 +21,7 @@ let lastZoneId = null;
 let lastDay = -1;
 let muted = false;
 let running = false;
+let landShake = 0;   // 落地相机震动计时
 
 const $ = id => document.getElementById(id);
 const scene = $('scene');   // 3D 渲染目标（WebGL，由 Render.init3D 接管）
@@ -281,9 +282,11 @@ function loop(t) {
     const d = Math.hypot(nl.x - player.x, nl.y - player.y);
     Render.syncPerson3D(g, {
       x: nl.x, y: nl.y,
-      yaw: (nl.tx !== nl.x || nl.ty !== nl.y) ? Math.atan2(nl.ty - nl.y, nl.tx - nl.x) : cam.a,
+      yaw: nl.faceYaw !== undefined ? nl.faceYaw : ((nl.tx !== nl.x || nl.ty !== nl.y) ? Math.atan2(nl.ty - nl.y, nl.tx - nl.x) : cam.a),
       moving: nl.moving, walkT: nl.walkT || 0, waving: nl.waving,
       expr: nl.expr || 'normal',
+      speed: nl.moving ? 0.55 : 0, dt,
+      lookX: d < 3 ? player.x : undefined, lookY: d < 3 ? player.y : undefined,
       showName: d < 4.2,
     });
   }
@@ -294,7 +297,8 @@ function loop(t) {
     if (pg.visible) {
       Render.syncPerson3D(pg, {
         x: player.x, y: player.y, yaw: cam.a, moving: movedThisFrame, walkT, waving: waving > 0,
-        stance: player.stance, h: player.h, airborne: !player.onGround, squash: player.squash,
+        stance: player.stance, h: player.h, airborne: !player.onGround, squash: player.squash, stretch: player.stretch || 0,
+        speed: Math.hypot(player.vx, player.vy), dt,
         showName: false,
       });
     }
@@ -305,7 +309,14 @@ function loop(t) {
   const eyeH = player.stance === 'prone' ? 0.2 : player.stance === 'crouch' ? 0.34 : 0.56;
   const thirdH = player.stance === 'prone' ? 0.75 : player.stance === 'crouch' ? 1.05 : 1.45;
   const bob = (movedThisFrame && player.onGround) ? Math.sin(walkT * Math.PI * 2) * 0.02 : 0;
-  Render.frame3D({ x: cam.x, y: cam.y, a: cam.a, pitch: (cam.pitch || 0) * 0.011, mode: viewMode, dist: camDist, shoulder: camShoulder, eyeH, thirdH, bob }, G.minutes);
+  // 落地相机震动（衰减随机偏移）
+  let shakeX = 0, shakeY = 0;
+  if (landShake > 0) {
+    const s = landShake / 0.35;
+    shakeX = (Math.random() - 0.5) * 0.05 * s;
+    shakeY = (Math.random() - 0.5) * 0.05 * s;
+  }
+  Render.frame3D({ x: cam.x + shakeX, y: cam.y + shakeY, a: cam.a, pitch: (cam.pitch || 0) * 0.011 + shakeY, mode: viewMode, dist: camDist, shoulder: camShoulder, eyeH, thirdH, bob }, G.minutes);
   updateHud();
   updateInteractTip();
   requestAnimationFrame(loop);
@@ -336,14 +347,25 @@ function updatePlayer(dt) {
   if (!player.onGround) {
     player.vh -= GRAV * dt;
     player.h += player.vh * dt;
+    // 空中伸展（起跳拉长）
+    player.stretch = Math.max(0, Math.min(1, player.vh / 4.3));
     if (player.h <= 0) {
       player.h = 0;
       player.onGround = true;
-      if (player.vh < -3.2) { player.squash = 1; sfx.bad(); }   // 重落地压缩
+      player.stretch = 0;
+      if (player.vh < -3.2) {
+        player.squash = 1;
+        landShake = 0.35;
+        Render.spawnPuff(player.x, player.y, 0.06, 8, 0xcfc5b0, 0.3);   // 重落地扬尘
+        sfx.bad();
+      } else if (player.vh < -1.5) {
+        Render.spawnPuff(player.x, player.y, 0.05, 4, 0xd8d0c0, 0.2);
+      }
       player.vh = 0;
     }
-  }
+  } else player.stretch = 0;
   if (player.squash > 0) player.squash = Math.max(0, player.squash - dt * 4.5);
+  if (landShake > 0) landShake -= dt;
 
   // 惯性移动（目标速度 → 加速逼近）
   const stanceSpd = player.stance === 'prone' ? 0.55 : player.stance === 'crouch' ? 1.05 : 2.1;
@@ -366,9 +388,11 @@ function updatePlayer(dt) {
   runningThisFrame = run && movedThisFrame;
   if (movedThisFrame) {
     const nx = player.x + player.vx * dt, ny = player.y + player.vy * dt;
-    let bx = false, by = false;
-    if (!blocked(nx, player.y)) player.x = nx; else { player.vx = 0; bx = true; }
-    if (!blocked(player.x, ny)) player.y = ny; else { player.vy = 0; by = true; }
+    // 碰撞：滑动保留 + 法线微弹（撞墙不再急停，而是轻弹+沿墙滑行）
+    if (!blocked(nx, player.y)) player.x = nx;
+    else { player.vx = -player.vx * 0.18; if (Math.abs(player.vx) > 1.4) Render.spawnPuff(player.x, player.y, 0.25, 2, 0x9a9488, 0.08); }
+    if (!blocked(player.x, ny)) player.y = ny;
+    else { player.vy = -player.vy * 0.18; if (Math.abs(player.vy) > 1.4) Render.spawnPuff(player.x, player.y, 0.25, 2, 0x9a9488, 0.08); }
     // NPC 推挤：撞到人把 TA 轻轻推开
     for (const nl of world.npcLive) {
       if (nl.hidden) continue;
@@ -454,6 +478,13 @@ function updateNpcs(dt) {
       if (nl.exprT <= 0) nl.expr = null;
     }
     nl.waitT -= dt;
+    if (nl.chatT > 0) {   // 路遇寒暄中：面对面停顿
+      nl.chatT -= dt;
+      nl.moving = false;
+      if (nl.chatT <= 0) { nl.faceYaw = undefined; nl.waitT = 0.5; }
+      continue;
+    }
+    if (nl.faceYaw !== undefined) nl.faceYaw = undefined;
     if (nl.waitT > 0) { nl.moving = false; continue; }
     const dx = nl.tx - nl.x, dy = nl.ty - nl.y;
     const d = Math.hypot(dx, dy);
@@ -467,6 +498,24 @@ function updateNpcs(dt) {
       nl.x += dx / d * sp; nl.y += dy / d * sp;
       nl.moving = true;
       nl.walkT = (nl.walkT || 0) + dt * 7;
+    }
+  }
+  // NPC 路遇寒暄：两个 NPC 靠近时停下面对面聊两句
+  for (let i = 0; i < world.npcLive.length; i++) {
+    const a = world.npcLive[i];
+    if (a.hidden || a.chatT > 0) continue;
+    for (let j = i + 1; j < world.npcLive.length; j++) {
+      const b = world.npcLive[j];
+      if (b.hidden || b.chatT > 0) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+      if (d < 0.62 && d > 0.001 && Math.random() < 0.5) {
+        a.chatT = b.chatT = 2.5 + Math.random() * 2;
+        a.faceYaw = Math.atan2(dy, dx);
+        b.faceYaw = Math.atan2(-dy, -dx);
+        if (!a.expr) a.expr = 'happy', a.exprT = a.chatT;
+        if (!b.expr) b.expr = 'happy', b.exprT = b.chatT;
+        break;
+      }
     }
   }
 }
