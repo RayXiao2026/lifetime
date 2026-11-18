@@ -967,7 +967,7 @@ function updateBalls(dt, player, world, npcs) {
     // 道具碰撞（圆-圆推出 + 法线反弹）
     if (world) for (const p of world.props) {
       if (!p.blocking) continue;
-      const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy), R = 0.42 + 0.09;
+      const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy), R = Math.max(0.14, (p.br || 0.42)) + 0.09;
       if (d < R && d > 0.001) {
         const nxn = dx / d, nyn = dy / d;
         b.x = p.x + nxn * R; b.y = p.y + nyn * R;
@@ -1037,7 +1037,7 @@ function wallAt3(x, y) {
 let ssrRT = null, ssrScene = null, ssrCam = null, ssrMat = null, ssrEnabled = true;
 function initSSR() {
   try {
-    const w = Math.floor(720 / 2), h = Math.floor(405 / 2);   // 半分辨率保性能
+    const w = 720, h = 405;   // 全分辨率：保画质（此前半分辨率导致整体发糊）
     const depth = new THREE.DepthTexture(w, h);
     depth.type = THREE.UnsignedShortType;
     ssrRT = new THREE.WebGLRenderTarget(w, h, { depthTexture: depth, depthBuffer: true });
@@ -1111,11 +1111,13 @@ function initSSR() {
           if (hitW <= 0.0) { gl_FragColor = base; return; }
           vec3 refl = hitCol;
           float w = clamp(wBase * hitW * uStrength, 0.0, 0.85);
-          gl_FragColor = vec4(mix(base.rgb, refl * (0.85 + fres * 0.3), w), base.a);
+          vec3 col = mix(base.rgb, refl * (0.85 + fres * 0.3), w);
+          gl_FragColor = vec4(pow(max(col, 0.0), vec3(0.4545)), base.a);   // 线性→sRGB（RT 为线性域）
         }
       `,
       depthTest: false, depthWrite: false,
     });
+    ssrMat.toneMapped = false;   // 避免 Pass2 双重 ACES
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ssrMat);
     quad.frustumCulled = false;
     ssrScene.add(quad);

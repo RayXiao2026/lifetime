@@ -427,7 +427,8 @@ function camBlocked(x, y) {
   if (wallAt(x, y)) return true;
   for (const p of world.props) {
     if (!p.blocking) continue;
-    if (Math.hypot(p.x - x, p.y - y) < 0.42) return true;
+    const r = Math.max(0.1, Math.min(0.42, (p.br || 0.55) - 0.08));
+    if (Math.hypot(p.x - x, p.y - y) < r) return true;
   }
   return false;
 }
@@ -462,7 +463,7 @@ function blocked(x, y) {
   }
   for (const p of world.props) {
     if (!p.blocking) continue;
-    if (Math.hypot(p.x - x, p.y - y) < 0.55) return true;
+    if (Math.hypot(p.x - x, p.y - y) < (p.br || 0.55)) return true;
   }
   return false;
 }

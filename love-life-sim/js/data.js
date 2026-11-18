@@ -74,9 +74,9 @@ const PROPS = [
   { type: 'bench', x: 9.5, y: 10.8, blocking: true }, { type: 'bench', x: 21.5, y: 10.8, blocking: true },
   { type: 'bench', x: 15.5, y: 25.5, blocking: true }, { type: 'bench', x: 7.5, y: 22.5, blocking: true },
   // 路灯
-  { type: 'lamp', x: 9.5, y: 11.8, blocking: false }, { type: 'lamp', x: 21.5, y: 11.8, blocking: false },
-  { type: 'lamp', x: 9.5, y: 21.8, blocking: false }, { type: 'lamp', x: 21.5, y: 21.8, blocking: false },
-  { type: 'lamp', x: 15.5, y: 20.8, blocking: false }, { type: 'lamp', x: 15.5, y: 10.2, blocking: false },
+  { type: 'lamp', blocking: true, br: 0.12, x: 9.5, y: 11.8, blocking: false }, { type: 'lamp', blocking: true, br: 0.12, x: 21.5, y: 11.8, blocking: false },
+  { type: 'lamp', blocking: true, br: 0.12, x: 9.5, y: 21.8, blocking: false }, { type: 'lamp', blocking: true, br: 0.12, x: 21.5, y: 21.8, blocking: false },
+  { type: 'lamp', blocking: true, br: 0.12, x: 15.5, y: 20.8, blocking: false }, { type: 'lamp', blocking: true, br: 0.12, x: 15.5, y: 10.2, blocking: false },
 ];
 
 // ---------- NPC ----------
