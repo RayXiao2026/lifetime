@@ -85,7 +85,7 @@ test('聊天：命中兴趣话题加成更高，重复话题衰减', () => {
   assertGt(r1.delta, r2.delta, '兴趣话题应加成更高');
   const r3 = core.interactChat(G, 'linxiaoyu', 'reading'); // 连续重复
   assert(r3.delta < r1.delta, '重复话题应衰减');
-  assertEq(core.relOf(G, 'linxiaoyu'), Math.min(100, r1.delta + r2.delta + r3.delta), '好感应累加');
+  assertEq(G.npcs.linxiaoyu.friendship, r1.delta + r2.delta + r3.delta, '友谊应累加');
 });
 
 test('心情低落时聊天效果减半', () => {
@@ -114,7 +114,7 @@ test('送礼：命中偏好大幅提升并扣库存', () => {
 test('约会门槛与结算', () => {
   const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
   assert(!core.askDate(G, 'linxiaoyu').ok, '好感不足不能约会');
-  G.npcs.linxiaoyu.rel = 50;
+  G.npcs.linxiaoyu.friendship = 50;
   assert(core.askDate(G, 'linxiaoyu').ok);
   G.player.money = 500;
   const r = core.resolveDate(G, 'linxiaoyu', 'cafe', [0, 1, 0]);
@@ -124,21 +124,21 @@ test('约会门槛与结算', () => {
 
 test('表白：门槛/成功转恋人/失败惩罚', () => {
   const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  assert(!core.canConfess(G, 'linxiaoyu').ok, '好感不足不能表白');
-  G.npcs.linxiaoyu.rel = 75; G.npcs.linxiaoyu.dates = 3;
+  assert(!core.canConfess(G, 'linxiaoyu').ok, '双轨不足不能表白');
+  G.npcs.linxiaoyu.romance = 75; G.npcs.linxiaoyu.friendship = 55; G.npcs.linxiaoyu.dates = 3;
   assert(core.canConfess(G, 'linxiaoyu').ok);
   const ok = core.confess(G, 'linxiaoyu', 0.01); // 强制成功
   assert(ok.success && core.stageOf(G, 'linxiaoyu') === 'lover', '成功后应为恋人');
   const G2 = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  G2.npcs.linxiaoyu.rel = 75; G2.npcs.linxiaoyu.dates = 3;
+  G2.npcs.linxiaoyu.romance = 75; G2.npcs.linxiaoyu.friendship = 55; G2.npcs.linxiaoyu.dates = 3;
   const fail = core.confess(G2, 'linxiaoyu', 0.99); // 强制失败
-  assert(!fail.success && G2.npcs.linxiaoyu.rel < 75, '失败应扣好感');
+  assert(!fail.success && G2.npcs.linxiaoyu.romance < 75, '失败应扣浪漫');
 });
 
 // ---------- 求婚与婚姻 ----------
 test('求婚：需恋人+戒指，成功后成婚', () => {
   const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  G.npcs.linxiaoyu.rel = 95; G.npcs.linxiaoyu.stage = 'lover';
+  G.npcs.linxiaoyu.romance = 95; G.npcs.linxiaoyu.friendship = 70; G.npcs.linxiaoyu.stage = 'lover';
   assert(!core.canPropose(G, 'linxiaoyu').ok, '没有戒指不能求婚');
   core.buyRing(G);
   assertEq(G.player.ring, 1);
@@ -152,7 +152,7 @@ test('求婚：需恋人+戒指，成功后成婚', () => {
 
 test('低好感求婚被拒', () => {
   const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  G.npcs.linxiaoyu.rel = 60; G.npcs.linxiaoyu.stage = 'lover';
+  G.npcs.linxiaoyu.romance = 60; G.npcs.linxiaoyu.friendship = 70; G.npcs.linxiaoyu.stage = 'lover';
   core.buyRing(G);
   const r = core.propose(G, 'linxiaoyu', 0.99);
   assert(!r.accepted && G.spouseId === null);
@@ -161,7 +161,7 @@ test('低好感求婚被拒', () => {
 // ---------- 生子与育儿 ----------
 test('怀孕与分娩时点（孕期27天）', () => {
   const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  G.spouseId = 'linxiaoyu'; G.npcs.linxiaoyu.stage = 'spouse'; G.npcs.linxiaoyu.rel = 80;
+  G.spouseId = 'linxiaoyu'; G.npcs.linxiaoyu.stage = 'spouse'; G.npcs.linxiaoyu.romance = 80;
   G.player.money = 5000;
   const r = core.tryBaby(G);
   assert(r.ok && G.pregnant === true && G.dueDay === G.day + 27);
@@ -201,7 +201,7 @@ test('结局分级：艺术家/运动员/名校与总评', () => {
   const mk = (stats, flags, spouseRel, married) => {
     const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
     G.child = { name: '豆豆', gender: 'M', birthDay: 0, stats, flags, roundsDone: 6 };
-    if (married) { G.spouseId = 'linxiaoyu'; G.npcs.linxiaoyu.stage = 'spouse'; G.npcs.linxiaoyu.rel = spouseRel; }
+    if (married) { G.spouseId = 'linxiaoyu'; G.npcs.linxiaoyu.stage = 'spouse'; G.npcs.linxiaoyu.romance = spouseRel; }
     G.player.careerLevel = 3; G.player.money = 20000; G.player.mood = 80;
     return G;
   };
@@ -239,11 +239,11 @@ test('图书馆学习与健身房锻炼', () => {
 
 test('好感衰减与夫妻矛盾', () => {
   const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  G.npcs.linxiaoyu.rel = 80; G.npcs.linxiaoyu.lastInteractDay = 0; G.day = 0;
+  G.npcs.linxiaoyu.friendship = 80; G.npcs.linxiaoyu.romance = 80; G.npcs.linxiaoyu.lastInteractDay = 0; G.day = 0;
   core.doSleep(G); core.doSleep(G); core.doSleep(G); core.doSleep(G);
-  assert(G.npcs.linxiaoyu.rel < 80, '3天不联系应衰减');
+  assert(G.npcs.linxiaoyu.romance < 80 && G.npcs.linxiaoyu.friendship < 80, '3天不联系应衰减');
   const G2 = core.createGame({ name: 't', gender: 'M', seed: 3 });
-  G2.spouseId = 'linxiaoyu'; G2.npcs.linxiaoyu.stage = 'spouse'; G2.npcs.linxiaoyu.rel = 35;
+  G2.spouseId = 'linxiaoyu'; G2.npcs.linxiaoyu.stage = 'spouse'; G2.npcs.linxiaoyu.romance = 35;
   const r = core.doSleep(G2);
   assert(r.events.some(e => e.type === 'quarrel'), '配偶好感过低应有矛盾事件');
 });
@@ -299,6 +299,88 @@ test('对话脚本构建：聊天结果转台词序列', () => {
   assert(script[0].speaker === '林小雨', '说话人应为NPC');
   assert(script[0].expr === 'happy', '兴趣命中应为开心表情');
   assert(script.every(s => typeof s.text === 'string' && s.text.length > 0), '台词非空');
+});
+
+// ---------- Sims 逆向：需求 / 双轨关系 / 情绪 / 特质 ----------
+test('需求随时间衰减，特质修正衰减速率', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.player.needs.hunger = 80;
+  core.decayNeeds(G, 120); // 2 小时
+  assert(G.player.needs.hunger < 80, '饥饿应衰减');
+  const G2 = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G2.player.needs.hunger = 80; G2.player.traits = ['foodie'];
+  core.decayNeeds(G2, 120);
+  assert(G2.player.needs.hunger < G.player.needs.hunger, '美食家饥饿应衰减更快');
+});
+
+test('饥饿归零触发强制事件', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.player.needs.hunger = 2;
+  core.decayNeeds(G, 600);
+  assert(G.player.needs.hunger > 5, '应被强制进食事件拉回');
+  assert(G.player.mood < 70, '挨饿应扣心情');
+});
+
+test('情绪由需求派生', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  assertEq(core.moodOf(G).id, 'fine');
+  G.player.needs.social = 10;
+  assertEq(core.moodOf(G).id, 'lonely');
+  G.player.needs.hunger = 10;
+  assertEq(core.moodOf(G).id, 'starving');
+});
+
+test('双轨关系：聊天涨友谊、浪漫互动涨浪漫且受友谊加成', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.player.mood = 70;
+  const r1 = core.interactChat(G, 'linxiaoyu', 'reading');
+  assert(r1.delta > 0 && G.npcs.linxiaoyu.friendship > 0, '聊天应加友谊');
+  assertEq(G.npcs.linxiaoyu.romance, 0, '聊天不应直接加浪漫');
+  const rom1 = core.doRomantic(G, 'linxiaoyu', 'gaze');
+  assert(rom1.delta >= 6 && G.npcs.linxiaoyu.romance >= 6, '深情对望应加浪漫');
+  const G2 = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G2.player.mood = 70; G2.npcs.linxiaoyu.friendship = 70;
+  const rom2 = core.doRomantic(G2, 'linxiaoyu', 'gaze');
+  assert(rom2.delta > rom1.delta, '高友谊应加成浪漫互动');
+});
+
+test('牵手需要浪漫门槛，调情受调情情绪加成', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.player.mood = 70;
+  const no = core.doRomantic(G, 'linxiaoyu', 'holdhands');
+  assert(!no.ok, '浪漫不足不能牵手');
+  G.npcs.linxiaoyu.romance = 50;
+  const yes = core.doRomantic(G, 'linxiaoyu', 'holdhands');
+  assert(yes.ok && yes.delta >= 8, '牵手应成功且加成明显');
+  G.player.flirtyT = 5;
+  const fl = core.doRomantic(G, 'linxiaoyu', 'flirt');
+  assert(fl.ok && fl.delta >= 5, '调情应生效');
+});
+
+test('表白需双轨门槛', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.npcs.linxiaoyu.romance = 75; G.npcs.linxiaoyu.friendship = 30; G.npcs.linxiaoyu.dates = 3;
+  assert(!core.canConfess(G, 'linxiaoyu').ok, '友谊不足不能表白');
+  G.npcs.linxiaoyu.friendship = 50;
+  assert(core.canConfess(G, 'linxiaoyu').ok, '双轨满足应可表白');
+});
+
+test('阶段由浪漫轨驱动', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.npcs.linxiaoyu.romance = 50;
+  assertEq(core.stageOf(G, 'linxiaoyu'), 'friend');
+  G.npcs.linxiaoyu.romance = 85;
+  assertEq(core.stageOf(G, 'linxiaoyu'), 'closeFriend');
+});
+
+test('特质影响互动与情绪（浪漫主义者）', () => {
+  const G = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G.player.mood = 70; G.player.traits = ['romantic'];
+  const r = core.doRomantic(G, 'linxiaoyu', 'gaze');
+  const G2 = core.createGame({ name: 't', gender: 'M', seed: 3 });
+  G2.player.mood = 70;
+  const r2 = core.doRomantic(G2, 'linxiaoyu', 'gaze');
+  assert(r.delta > r2.delta, '浪漫主义者浪漫互动更强');
 });
 
 // ---------- 汇总 ----------

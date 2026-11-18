@@ -391,6 +391,7 @@ function makePropSprite(type) {
     tree: [40, 72], lamp: [20, 72], bench: [40, 26], fountain: [60, 40],
     bed: [48, 28], desk: [44, 30], shelf: [44, 44], counter: [44, 28],
     counter2: [44, 28], equip: [40, 32], hdesk: [44, 28], child: [26, 46],
+    fridge: [28, 44], shower: [32, 46],
   };
   const dim = map[type] || [28, 40];
   const c = makeCanvas(dim[0], dim[1]), ctx = c.getContext('2d');
@@ -453,6 +454,19 @@ function makePropSprite(type) {
     px(ctx, 5, 0, 30, 10, '#44444e'); px(ctx, 5, 0, 30, 2, '#5c5c6a');
     px(ctx, 10, 3, 8, 5, '#e05c5c'); px(ctx, 22, 3, 8, 5, '#5ce0b0');
     px(ctx, 14, 32, 12, 3, '#2b2b30');
+  } else if (type === 'fridge') {
+    px(ctx, 2, 2, 24, 40, '#d5dade');                       // 双门冰箱
+    px(ctx, 2, 2, 24, 18, '#e8ecf0'); px(ctx, 2, 22, 24, 18, '#c2c9d2');
+    px(ctx, 2, 2, 24, 2, '#f2f5f8');
+    px(ctx, 20, 8, 3, 7, '#8a92a0'); px(ctx, 20, 27, 3, 7, '#8a92a0');   // 把手
+    px(ctx, 5, 6, 8, 6, '#e05c7a'); px(ctx, 15, 6, 6, 6, '#7ac98a');     // 贴纸
+  } else if (type === 'shower') {
+    px(ctx, 2, 6, 28, 38, '#b8c4d0');                       // 淋浴间
+    px(ctx, 4, 8, 24, 34, '#9ec8e0');
+    px(ctx, 4, 8, 24, 34, 'rgba(255,255,255,.15)');
+    px(ctx, 12, 10, 8, 3, '#5a7a9a');                       // 花洒
+    for (let i = 0; i < 5; i++) px(ctx, 13 + i * 2, 14 + (i % 3), 1, 4, 'rgba(200,235,255,.7)'); // 水流
+    px(ctx, 2, 42, 28, 2, '#8a96a4');
   } else if (type === 'child') {
     px(ctx, 8, 34, 10, 12, '#5c8ad5');
     px(ctx, 8, 34, 3, 12, '#77a0e8');

@@ -56,6 +56,8 @@ function zoneAt(x, y) {
 // ---------- 道具（可交互站点） ----------
 const PROPS = [
   { type: 'bed',     x: 5.5,  y: 4.5,  blocking: true,  label: '床' },
+  { type: 'fridge',  x: 7.5,  y: 5.5,  blocking: true,  label: '冰箱' },
+  { type: 'shower',  x: 3.5,  y: 5.5,  blocking: true,  label: '淋浴间' },
   { type: 'desk',    x: 14.5, y: 4.5,  blocking: true,  label: '工位' },
   { type: 'shelf',   x: 24.5, y: 4.5,  blocking: true,  label: '书架' },
   { type: 'counter', x: 4.5,  y: 14.5, blocking: true,  label: '咖啡柜台' },
@@ -204,6 +206,35 @@ const PRAISE_LINES = [
 ];
 const CHAT_TIRED = '（对方似乎有点累了，改天再聊吧。）';
 
+// ---------- Sims 逆向：特质 / 情绪 / 浪漫互动 ----------
+const TRAITS = [
+  { id: 'romantic',  name: '浪漫主义者', desc: '浪漫互动效果 +35%', fx: { romanceMult: 1.35 } },
+  { id: 'foodie',    name: '美食家',     desc: '美食让你快乐，但也更容易饿', fx: { hungerDecay: 1.45 } },
+  { id: 'homebody',  name: '宅',         desc: '社交消耗更慢', fx: { socialDecay: 0.55 } },
+  { id: 'sporty',    name: '运动狂',     desc: '健身效果更佳，精力更持久', fx: { gymBonus: 1, energyUse: 0.8 } },
+  { id: 'bookworm',  name: '书虫',       desc: '学习效果更佳', fx: { studyBonus: 1 } },
+  { id: 'socialite', name: '社交达人',   desc: '聊天效果 +30%', fx: { chatMult: 1.3 } },
+];
+// 情绪（Sims Moods 逆向）：id/名称/聊天修正/颜色
+const MOODS = {
+  starving: { label: '饥饿难耐', chatMod: -2, color: '#e08a3c' },
+  tired:    { label: '疲惫不堪', chatMod: -1, color: '#8a8aa0' },
+  grimy:    { label: '邋里邋遢', chatMod: -2, color: '#7a8a5a' },
+  lonely:   { label: '孤独',     chatMod: -2, color: '#5a7ab8' },
+  bored:    { label: '无聊透顶', chatMod: -1, color: '#9a7ab8' },
+  flirty:   { label: '怦然心动', chatMod: 2,  color: '#ff6f9c' },
+  happy:    { label: '开心',     chatMod: 1,  color: '#5ce0a0' },
+  fine:     { label: '平静',     chatMod: 0,  color: '#b8a9d5' },
+};
+// 浪漫互动（Sims Romance 逆向）：友谊加成 f>=60:+2 / f>=30:+1
+const ROMANTIC_ACTIONS = {
+  gaze:      { name: '深情对望', base: 6, need: 0,  text: ['你们的眼神在半空相遇，谁都没有先移开。', 'TA 的耳根悄悄红了，却笑着看向你。'] },
+  flirt:     { name: '开个暧昧的玩笑', base: 5, need: 0,  text: ['你压低声音说了句什么，TA 笑着捶了你一下。', '「讨厌……谁要听你说这个。」TA 嘴上嫌弃，眼里却在笑。'] },
+  holdhands: { name: '牵起 TA 的手', base: 9, need: 40, text: ['十指相扣的那一刻，时间好像慢了半拍。', 'TA 反手轻轻握紧了你。'] },
+};
+// 需求衰减（每小时，Sims Needs 逆向）
+const NEED_RATES = { hunger: 4.2, hygiene: 3.6, social: 2.6, fun: 4.4 };
+
 // ---------- 礼物 ----------
 const GIFTS = {
   book:      { name: '精装书',   price: 60,  desc: '沉甸甸的知识' },
@@ -279,6 +310,7 @@ const DATA = {
   CHAT_REACT, PRAISE_REACT, GIFT_REACT, GREETINGS,
   PRAISE_LINES, CHAT_TIRED, GIFTS, RING_PRICE, CAREERS, DATE_SPOTS,
   PARENTING_ACTIONS, CHILD_MILESTONE_AGES, CHILD_EVENTS, CLASS_KINDS, CHILD_PATHS,
+  TRAITS, MOODS, ROMANTIC_ACTIONS, NEED_RATES,
 };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { DATA };

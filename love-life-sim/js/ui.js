@@ -135,10 +135,26 @@ function updateChildLive() {
 
 // ---------- 输入 ----------
 let playerGender = 'M';
+let pickedTraits = [];
 document.querySelectorAll('.gender-btn').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('.gender-btn').forEach(x => x.classList.remove('sel'));
   b.classList.add('sel'); playerGender = b.dataset.g;
 }));
+// 特质三选（Sims Traits 逆向）
+(function buildTraits() {
+  const box = $('trait-chips');
+  for (const t of D.TRAITS) {
+    const chip = document.createElement('button');
+    chip.className = 'trait-chip';
+    chip.innerHTML = `${t.name}<small>${t.desc}</small>`;
+    chip.addEventListener('click', () => {
+      if (chip.classList.contains('sel')) { chip.classList.remove('sel'); pickedTraits = pickedTraits.filter(x => x !== t.id); }
+      else if (pickedTraits.length < 3) { chip.classList.add('sel'); pickedTraits.push(t.id); }
+      sfx.ui();
+    });
+    box.appendChild(chip);
+  }
+})();
 
 $('btn-start').addEventListener('click', () => {
   const name = $('player-name').value.trim() || '阿哲';
@@ -210,6 +226,7 @@ function toggleOverlay(id) {
 // ---------- 开始 ----------
 function startGame(name, gender) {
   G = C.createGame({ name, gender });
+  G.player.traits = pickedTraits.slice();
   buildWorld();
   player = { x: 5.5, y: 6.5 };
   playerImgs = {
@@ -456,6 +473,21 @@ function tryInteract() {
 function useStation(p) {
   switch (p.type) {
     case 'bed': sleepAtHome(); break;
+    case 'fridge': {
+      C.addMinutes(G, 20);
+      G.player.needs.hunger = Math.min(100, G.player.needs.hunger + 55);
+      G.player.energy = Math.min(100, G.player.energy + 5);
+      G.player.mood = Math.min(100, G.player.mood + 3);
+      notify('你从冰箱翻出食材做了顿简餐。饥饿 +55', 'good'); sfx.ui();
+      break;
+    }
+    case 'shower': {
+      C.addMinutes(G, 30);
+      G.player.needs.hygiene = Math.min(100, G.player.needs.hygiene + 70);
+      G.player.mood = Math.min(100, G.player.mood + 6);
+      notify('热水冲走了一身疲惫。卫生 +70 心情 +6', 'good'); sfx.ui();
+      break;
+    }
     case 'desk': {
       const r = C.doWork(G);
       if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); break; }
@@ -478,7 +510,9 @@ function useStation(p) {
     case 'counter': {
       const r = C.eatFood(G, 'cafe');
       if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); break; }
-      notify(r.text + '（-50 元）', 'good'); sfx.ui();
+      G.player.needs.hunger = Math.min(100, G.player.needs.hunger + 45);
+      G.player.needs.social = Math.min(100, G.player.needs.social + 6);
+      notify('一份简餐下肚，饥饿 +45。', 'good'); sfx.ui();
       break;
     }
     case 'counter2': renderShop(); togglePanel('shop'); break;
@@ -532,8 +566,8 @@ function advPortrait(expr) {
 
 function advRelBar() {
   const st = G.npcs[curNpc.id];
-  $('adv-relfill').style.width = st.rel + '%';
-  $('adv-relval').textContent = '好感 ' + st.rel;
+  $('adv-relfill').style.width = st.romance + '%';
+  $('adv-relval').textContent = `浪漫 ${st.romance} · 友谊 ${st.friendship}`;
 }
 
 function playScript(script, done) {
@@ -638,6 +672,7 @@ function advRenderHome() {
   } else {
     btn('闲聊', advRenderTopics, '选对话题');
     btn('夸赞 TA', doPraise);
+    btn('浪漫互动', advRenderRomance, '对望/调情/牵手');
     const hasGift = Object.keys(G.player.inv).some(k => G.player.inv[k] > 0);
     btn('送礼', hasGift ? advRenderGifts : null, hasGift ? '从背包挑选' : '背包空空（商场有卖）', !hasGift);
     const dateOk = C.askDate(G, nl.id);
@@ -677,6 +712,35 @@ function doChat(topic) {
   if (r.delta > 0 && script.length) script[script.length - 1].text += `（好感 +${r.delta}）`;
   playScript(script, () => advRenderTopics());
   sfx.good();
+}
+
+function advRenderRomance() {
+  const st = G.npcs[curNpc.id];
+  const list = Object.keys(D.ROMANTIC_ACTIONS).map(k => {
+    const a = D.ROMANTIC_ACTIONS[k];
+    const locked = st.romance < a.need;
+    return {
+      label: a.name,
+      hint: locked ? `浪漫 ${a.need} 解锁` : null,
+      fn: locked ? null : () => doRomanticUI(k),
+      dis: locked,
+    };
+  });
+  list.push({ label: '返回', fn: advRenderHome });
+  $('adv-text').textContent = `浪漫 ${st.romance} · 友谊 ${st.friendship}。想做点什么？`;
+  advRenderOptions(list);
+}
+function doRomanticUI(kind) {
+  const r = C.doRomantic(G, curNpc.id, kind);
+  if (!r.ok) { notify(r.reason, 'warn'); sfx.bad(); advRenderHome(); return; }
+  advRelBar();
+  const expr = kind === 'holdhands' ? 'shy' : 'happy';
+  const script = [
+    { speaker: curNpc.npc.name, expr, text: r.text },
+    { speaker: curNpc.npc.name, expr: 'shy', text: `（浪漫 +${r.delta}）` },
+  ];
+  playScript(script, () => advRenderRomance());
+  sfx.love();
 }
 
 function doPraise() {
@@ -977,7 +1041,8 @@ function renderStatus() {
     const info = st.revealed ? `（喜欢${D.GIFTS[n.giftPref].name}）` : '';
     const dates = st.dates ? ` · 约会${st.dates}次` : '';
     html += `<div class="relation-row"><span class="rname">${n.name}</span><span class="rstage">${C.stageLabel(G, n.id)}</span>
-      <div class="rtrack"><div class="rfill" style="width:${st.rel}%"></div></div><span class="rval">${st.rel}</span>
+      <div class="rtrack"><div class="rfill" style="width:${st.romance}%"></div></div><span class="rval">${st.romance}</span>
+      <span style="font-size:10px;color:#8ad5a0">友${st.friendship}</span>
       <span style="font-size:11px;color:#6f6390">${info}${dates}</span></div>`;
   }
   if (G.pregnant) html += `<div class="sec-title">家庭</div><div>孕期中，预产期约在第 ${(G.dueDay - G.day)} 天后。</div>`;
@@ -1005,6 +1070,8 @@ function renderShop() {
   const clothesPrice = 500 * (p.clothesTier + 1);
   html += `<div class="shop-item"><div class="si-name">新衣服（第${p.clothesTier + 1}件）</div><div class="si-desc">魅力 +5</div>
     <div class="si-price">${clothesPrice} 元</div><button data-buy="clothes" ${(p.clothesTier >= 3 || p.money < clothesPrice) ? 'disabled' : ''}>购买</button></div>`;
+  html += `<div class="shop-item"><div class="si-name">看场电影</div><div class="si-desc">娱乐 +45 · 心情 +5</div>
+    <div class="si-price">100 元</div><button data-buy="movie" ${p.money < 100 ? 'disabled' : ''}>观影</button></div>`;
   html += '</div>';
   $('shop-body').innerHTML = html;
   $('shop-body').querySelectorAll('button[data-buy]').forEach(b => b.addEventListener('click', () => {
@@ -1012,6 +1079,14 @@ function renderShop() {
     if (k === 'ring') {
       const r = C.buyRing(G);
       if (r.ok) { notify('买到了戒指。找机会向 TA 求婚吧！', 'good'); sfx.good(); }
+    } else if (k === 'movie') {
+      if (p.money >= 100) {
+        p.money -= 100;
+        G.player.needs.fun = Math.min(100, G.player.needs.fun + 45);
+        G.player.mood = Math.min(100, G.player.mood + 5);
+        C.addMinutes(G, 120);
+        notify('看了一场好电影，整个人都松弛了。娱乐 +45', 'good'); sfx.good();
+      }
     } else if (k === 'clothes') {
       const price = 500 * (p.clothesTier + 1);
       if (p.money >= price && p.clothesTier < 3) {
@@ -1041,6 +1116,15 @@ function updateHud() {
   $('hud-view').textContent = viewMode === 'third' ? '第三人称' : '第一人称';
   $('bar-energy').style.width = G.player.energy + '%';
   $('bar-mood').style.width = G.player.mood + '%';
+  const n = G.player.needs;
+  $('bar-hunger').style.width = n.hunger + '%';
+  $('bar-hygiene').style.width = n.hygiene + '%';
+  $('bar-social').style.width = n.social + '%';
+  $('bar-fun').style.width = n.fun + '%';
+  const mood = C.moodOf(G);
+  const badge = $('mood-badge');
+  badge.textContent = '情绪 · ' + mood.label;
+  badge.style.color = mood.color;
 }
 
 // ---------- 暂停 / 存档 ----------
@@ -1074,10 +1158,10 @@ $('dev-toggle').addEventListener('click', () => $('dev').classList.toggle('open'
     ['+10 天', () => { for (let i = 0; i < 10; i++) C.doSleep(G); morningProcess([]); }],
     ['金钱+5000', () => { G.player.money += 5000; notify('+5000'); }],
     ['体力/心情拉满', () => { G.player.energy = 100; G.player.mood = 100; }],
-    ['全候选好感+40', () => { C.candidates(G).forEach(n => { G.npcs[n.id].rel = Math.min(100, G.npcs[n.id].rel + 40); G.npcs[n.id].lastInteractDay = G.day; }); notify('好感+40'); }],
+    ['全候选好感+40', () => { C.candidates(G).forEach(n => { const st = G.npcs[n.id]; st.romance = Math.min(100, st.romance + 40); st.friendship = Math.min(100, st.friendship + 40); st.lastInteractDay = G.day; }); notify('双轨+40'); }],
     ['约会次数+3(最近候选)', () => { const c = C.candidates(G)[0]; if (c) { G.npcs[c.id].dates += 3; notify(c.name + ' 约会+3'); } }],
-    ['直接恋爱', () => { const c = C.candidates(G)[0]; if (c) { G.npcs[c.id].stage = 'lover'; G.npcs[c.id].rel = Math.max(G.npcs[c.id].rel, 92); notify('与' + c.name + '恋爱'); } }],
-    ['直接结婚', () => { const c = C.candidates(G).find(n => G.npcs[n.id].stage === 'lover') || C.candidates(G)[0]; if (c) { G.npcs[c.id].stage = 'spouse'; G.npcs[c.id].rel = 100; G.spouseId = c.id; updateNpcZones(); notify('与' + c.name + '结婚'); } }],
+    ['直接恋爱', () => { const c = C.candidates(G)[0]; if (c) { const st = G.npcs[c.id]; st.stage = 'lover'; st.romance = Math.max(st.romance, 92); st.friendship = Math.max(st.friendship, 60); notify('与' + c.name + '恋爱'); } }],
+    ['直接结婚', () => { const c = C.candidates(G).find(n => G.npcs[n.id].stage === 'lover') || C.candidates(G)[0]; if (c) { const st = G.npcs[c.id]; st.stage = 'spouse'; st.romance = 100; st.friendship = Math.max(st.friendship, 85); G.spouseId = c.id; updateNpcZones(); notify('与' + c.name + '结婚'); } }],
     ['立即怀孕', () => { if (!G.spouseId) { notify('先结婚'); return; } G.pregnant = true; G.dueDay = G.day + 1; notify('明天生'); }],
     ['快进到下个成长节点', () => { if (!G.child) { notify('还没孩子'); return; } const next = D.CHILD_MILESTONE_AGES[G.child.roundsDone]; const target = G.child.birthDay + next * 36; while (G.day < target) C.doSleep(G); morningProcess([]); }],
     ['直接结算', () => openEnding()],

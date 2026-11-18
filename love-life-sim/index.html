@@ -21,6 +21,10 @@
           <button class="gender-btn sel" data-g="M">男主</button>
           <button class="gender-btn" data-g="F">女主</button>
         </div>
+        <div class="trait-pick">
+          <div class="trait-title">选择你的特质（最多 3 个）</div>
+          <div id="trait-chips"></div>
+        </div>
       </div>
       <button id="btn-start" class="big-btn">开 始 人 生</button>
       <div class="title-tips">点击画面锁定鼠标转视角 · WASD 移动（A/D 侧移） · Shift 奔跑 · V 切换第一/第三人称 · E 互动</div>
@@ -52,7 +56,12 @@
     <div id="hud-bars">
       <div class="bar"><i>体力</i><div class="track"><div id="bar-energy" class="fill"></div></div></div>
       <div class="bar"><i>心情</i><div class="track"><div id="bar-mood" class="fill mood"></div></div></div>
+      <div class="bar"><i>饥饿</i><div class="track"><div id="bar-hunger" class="fill need"></div></div></div>
+      <div class="bar"><i>卫生</i><div class="track"><div id="bar-hygiene" class="fill need"></div></div></div>
+      <div class="bar"><i>社交</i><div class="track"><div id="bar-social" class="fill need"></div></div></div>
+      <div class="bar"><i>娱乐</i><div class="track"><div id="bar-fun" class="fill need"></div></div></div>
     </div>
+    <div id="mood-badge"></div>
 
     <!-- 交互提示 -->
     <div id="interact-tip" class="hidden"></div>
@@ -111,6 +120,10 @@
         <p>点击画面锁定鼠标 → 鼠标转视角 · W/S 前后走 · A/D 左右侧移 · Shift 奔跑 · V 切换第一/第三人称（第三人称能看到自己走路和挥手） · E 互动（对话中按 E 或点击推进） · I 生涯 · M 地图 · ESC 菜单</p>
         <h4>一天怎么过</h4>
         <p>时间会流逝，23:00 必须休息。上班赚钱、图书馆涨才华、健身房涨魅力；商场买礼物，投其所好送人。</p>
+        <h4>需求与情绪（模拟人生式）</h4>
+        <p>饥饿/卫生/社交/娱乐四项需求随时间衰减：家里冰箱吃饭、淋浴间洗澡、找人聊天、商场看电影补足。需求过低会改变情绪（饥饿难耐/邋遢/孤独…），负面情绪削弱一切社交效果；调情后 4 小时「怦然心动」加成浪漫互动。</p>
+        <h4>双轨关系</h4>
+        <p>聊天/夸赞涨【友谊】，浪漫互动（对望/调情/牵手）涨【浪漫】；友谊越高，浪漫互动效果越好。约会需友谊 40，表白需浪漫 60 + 友谊 40，求婚需浪漫 90 + 友谊 60 + 戒指。开局选的特质会改变你的生活方式。</p>
         <h4>恋爱路线</h4>
         <p>聊天选对话题（TA 的兴趣加成最高，可找李姐打听）→ 好感 40 可约会 → 好感 70 + 约会 3 次可表白 → 恋人后好感 90 + 戒指可求婚 → 婚后可以要孩子。</p>
         <h4>养育路线</h4>

@@ -39,6 +39,8 @@ function createGame(opt) {
       careerLevel: 0, careerDays: 0,
       inv: { book: 0, sweet: 0, flower: 0, sportgear: 0, digital: 0, gamemerch: 0 },
       ring: 0, clothesTier: 0,
+      needs: { hunger: 80, hygiene: 85, social: 70, fun: 70 },
+      traits: [], flirtyT: 0,
     },
     npcs: {},
     spouseId: null, marriageDay: -1,
@@ -49,7 +51,7 @@ function createGame(opt) {
   G.rng = mulberry32(seed);
   for (let i = 0; i < D().NPCS.length; i++) {
     const n = D().NPCS[i];
-    G.npcs[n.id] = { rel: 0, stage: 'stranger', dates: 0, lastTopic: null, lastInteractDay: -99, cooldownUntil: -1, revealed: false };
+    G.npcs[n.id] = { friendship: 0, romance: 0, stage: 'stranger', dates: 0, recentTopics: [], lastInteractDay: -99, cooldownUntil: -1, revealed: false };
   }
   return G;
 }
@@ -77,6 +79,65 @@ function fmtDate(G) {
 function addMinutes(G, m) {
   G.minutes += m;
   if (G.minutes >= SLEEP_MIN) { G.minutes = SLEEP_MIN; G.needSleep = true; }
+  decayNeeds(G, m);
+}
+
+// ---------- Sims 逆向：需求 / 情绪 / 特质 ----------
+function traitFx(G, key, def) {
+  let v = def === undefined ? 1 : def;
+  for (const tid of G.player.traits) {
+    const t = D().TRAITS.find(x => x.id === tid);
+    if (t && t.fx[key] !== undefined) v *= t.fx[key];
+  }
+  return v;
+}
+function decayNeeds(G, minutes) {
+  const h = minutes / 60, n = G.player.needs, R = D().NEED_RATES;
+  n.hunger = Math.max(0, n.hunger - R.hunger * traitFx(G, 'hungerDecay') * h);
+  n.hygiene = Math.max(0, n.hygiene - R.hygiene * h);
+  n.social = Math.max(0, n.social - R.social * traitFx(G, 'socialDecay') * h);
+  n.fun = Math.max(0, n.fun - R.fun * h);
+  if (G.player.flirtyT > 0) G.player.flirtyT = Math.max(0, G.player.flirtyT - h);
+  // 饥饿归零：强制进食事件（Sims 风格：不会真饿死，但很惨）
+  if (n.hunger <= 0) {
+    n.hunger = 35;
+    G.player.energy = Math.max(5, G.player.energy - 25);
+    G.player.mood = Math.max(10, G.player.mood - 15);
+    logEvent(G, 'starve', '你饿得眼冒金星，翻出便利店过期饭团狼吞虎咽。（体力-25 心情-15）');
+  }
+}
+function moodOf(G) {
+  const n = G.player.needs;
+  let id = 'fine';
+  if (n.hunger < 20) id = 'starving';
+  else if (G.player.energy < 20) id = 'tired';
+  else if (n.hygiene < 20) id = 'grimy';
+  else if (n.social < 25) id = 'lonely';
+  else if (n.fun < 25) id = 'bored';
+  else if (G.player.flirtyT > 0) id = 'flirty';
+  else if (G.player.mood >= 75) id = 'happy';
+  const m = D().MOODS[id] || D().MOODS.fine;
+  return { id, label: m.label, chatMod: m.chatMod, color: m.color };
+}
+// 浪漫互动（友谊加成 f>=60:+2 / f>=30:+1）
+function doRomantic(G, id, kind) {
+  const act = D().ROMANTIC_ACTIONS[kind];
+  const st = G.npcs[id];
+  if (!act) return { ok: false, reason: '未知互动' };
+  if (!spend(G, 4, 20)) return { ok: false, reason: '太累了（体力不足）' };
+  if (st.romance < act.need) return { ok: false, reason: `浪漫值不足 ${act.need}` };
+  let delta = act.base;
+  if (st.friendship >= 60) delta += 2;
+  else if (st.friendship >= 30) delta += 1;
+  delta = Math.round(delta * traitFx(G, 'romanceMult'));
+  delta += moodOf(G).chatMod;
+  if (G.player.mood < 40) delta = Math.max(1, Math.ceil(delta / 2));
+  st.romance += delta; clampRel(st); touch(st, G);
+  G.player.needs.fun = Math.min(100, G.player.needs.fun + 6);
+  G.player.needs.social = Math.min(100, G.player.needs.social + 8);
+  if (kind === 'flirt') G.player.flirtyT = 4;   // 调情后 4 小时「怦然心动」
+  const text = pickFrom(G.rng, act.text);
+  return { ok: true, delta, text, kind };
 }
 
 function doSleep(G, forced) {
@@ -86,6 +147,7 @@ function doSleep(G, forced) {
   G.needSleep = false;
   syncAge(G);
   G.player.energy = forced ? 80 : 100;
+  decayNeeds(G, 420);   // 睡眠时段需求照常衰减（Sims 习惯：睡醒想吃早饭）
   if (forced) { G.player.mood = Math.max(10, G.player.mood - 5); events.push({ type: 'forcedSleep', text: '你熬到深夜才睡，头昏昏沉沉的。' }); }
   // 心情回归
   if (G.player.mood < 60) G.player.mood = Math.min(60, G.player.mood + 6);
@@ -94,12 +156,15 @@ function doSleep(G, forced) {
   // 好感衰减：3 天不联系 -1
   for (const id in G.npcs) {
     const st = G.npcs[id];
-    if (st.rel >= 40 && G.day - st.lastInteractDay >= 3) st.rel = Math.max(0, st.rel - 1);
+    if (G.day - st.lastInteractDay >= 3) {
+      if (st.friendship >= 40) st.friendship = Math.max(0, st.friendship - 1);
+      if (st.romance >= 40) st.romance = Math.max(0, st.romance - 1);
+    }
   }
   // 夫妻矛盾
-  if (G.spouseId && G.npcs[G.spouseId].rel < 40) {
+  if (G.spouseId && G.npcs[G.spouseId].romance < 40) {
     G.player.mood = Math.max(10, G.player.mood - 8);
-    G.npcs[G.spouseId].rel = Math.min(100, G.npcs[G.spouseId].rel + 2);
+    G.npcs[G.spouseId].romance = Math.min(100, G.npcs[G.spouseId].romance + 2);
     events.push({ type: 'quarrel', text: '你和爱人吵了一架，家里的空气很沉。记得多陪陪 TA。' });
   }
   // 分娩
@@ -120,14 +185,14 @@ function scheduleZone(npc, hour) {
 function candidates(G) {
   return D().NPCS.filter(n => n.role === 'romance' && n.gender !== G.player.gender);
 }
-function relOf(G, id) { return G.npcs[id].rel; }
+function relOf(G, id) { return G.npcs[id].romance; }
 function stageOf(G, id) {
   const st = G.npcs[id];
   if (st.stage === 'lover' || st.stage === 'spouse') return st.stage;
-  if (st.rel < 20) return 'stranger';
-  if (st.rel < 40) return 'acquaintance';
-  if (st.rel < 60) return 'friend';
-  if (st.rel < 80) return 'crush';
+  if (st.romance < 20) return 'stranger';
+  if (st.romance < 40) return 'acquaintance';
+  if (st.romance < 60) return 'friend';
+  if (st.romance < 80) return 'crush';
   return 'closeFriend';
 }
 const STAGE_LABELS = {
@@ -136,7 +201,10 @@ const STAGE_LABELS = {
 };
 function stageLabel(G, id) { return STAGE_LABELS[stageOf(G, id)] || '陌生'; }
 
-function clampRel(st) { st.rel = Math.max(0, Math.min(100, st.rel)); }
+function clampRel(st) {
+  st.friendship = Math.max(0, Math.min(100, st.friendship));
+  st.romance = Math.max(0, Math.min(100, st.romance));
+}
 function touch(st, G) { st.lastInteractDay = G.day; }
 
 function spend(G, energy, minutes) {
@@ -168,22 +236,25 @@ function interactChat(G, id, topic) {
   if (isRepeat) { delta = Math.ceil(delta * 0.4); text += '（这个话题最近聊过了…）'; }
   if (G.player.mood < 40) delta = Math.ceil(delta / 2);
   delta += Math.floor(G.player.charm / 40);
-  st.rel += delta; clampRel(st); touch(st, G);
+  delta = Math.round(delta * traitFx(G, 'chatMult')) + moodOf(G).chatMod;
+  delta = Math.max(1, delta);
+  st.friendship += delta; clampRel(st); touch(st, G);
   st.recentTopics = [topic].concat(st.recentTopics || []).slice(0, 2);
-  if (st.rel >= 20 && st.stage === 'stranger' && !st.metLogged) { st.metLogged = true; logEvent(G, 'meet', `你和${npc.name}熟识了起来。`); }
+  G.player.needs.social = Math.min(100, G.player.needs.social + 10);   // 聊天满足社交需求
+  if (st.friendship >= 20 && st.stage === 'stranger' && !st.metLogged) { st.metLogged = true; logEvent(G, 'meet', `你和${npc.name}熟识了起来。`); }
   return { ok: true, delta, text, special };
 }
 
 function interactPraise(G, id) {
   const st = G.npcs[id];
   if (!spend(G, 3, 15)) return { ok: false, reason: '太累了（体力不足）' };
-  const p = 0.35 + G.player.charm / 200 + st.rel / 400;
+  const p = 0.35 + G.player.charm / 200 + st.friendship / 400;
   const roll = G.rng();
   let delta, text;
   if (roll < p) { delta = 4 + Math.floor(G.rng() * 3); text = pickFrom(G.rng, D().PRAISE_LINES); }
   else { delta = 1; text = 'TA 礼貌地笑了笑，好像有点不好意思。'; }
   if (G.player.mood < 40) delta = Math.max(1, Math.ceil(delta / 2));
-  st.rel += delta; clampRel(st); touch(st, G);
+  st.friendship += delta; clampRel(st); touch(st, G);
   return { ok: true, delta, text };
 }
 
@@ -212,11 +283,13 @@ function giveGift(G, id, cat) {
   if (cat === npc.giftPref) {
     delta = 14 + Math.floor(G.rng() * 7);
     text = `「${D().GIFTS[cat].name}！你怎么知道我喜欢这个！」TA 眼睛亮了。`;
+    st.friendship += 4;   // 投其所好也升温友谊
   } else {
     delta = 5 + Math.floor(G.rng() * 4);
     text = `TA 收下了${D().GIFTS[cat].name}，客气地道了谢。`;
+    st.friendship += 5;
   }
-  st.rel += delta; clampRel(st); touch(st, G);
+  st.romance += delta; clampRel(st); touch(st, G);
   return { ok: true, delta, text };
 }
 
@@ -224,7 +297,7 @@ function giveGift(G, id, cat) {
 function askDate(G, id) {
   const st = G.npcs[id];
   if (st.stage === 'spouse') return { ok: true };
-  if (st.rel < 40) return { ok: false, reason: '好感不足 40，还只是普通关系' };
+  if (st.friendship < 40) return { ok: false, reason: '友谊不足 40，先做朋友吧' };
   if (G.player.energy < 20) return { ok: false, reason: '体力不足' };
   if (G.day < st.cooldownUntil) return { ok: false, reason: 'TA 最近有点忙，过几天再约' };
   return { ok: true };
@@ -245,8 +318,9 @@ function resolveDate(G, id, spot, choices) {
     if (choices[i] === 0) delta += inter.indexOf(spotTopic(spot, i)) >= 0 ? 7 : 3;
     else delta += 2;
   }
-  st.rel += delta; clampRel(st); touch(st, G);
+  st.romance += delta; st.friendship += Math.ceil(delta / 2); clampRel(st); touch(st, G);
   st.dates += 1; G.stats.dates++;
+  G.player.needs.fun = Math.min(100, G.player.needs.fun + 20);
   const text = spotData.lines.join(' ');
   logEvent(G, 'date', `你和${npc.name}在${spotData.name}约会，气氛很好。`);
   return { ok: true, delta, text };
@@ -261,22 +335,23 @@ function spotTopic(spot, i) {
 function canConfess(G, id) {
   const st = G.npcs[id];
   if (st.stage !== 'stranger') return { ok: false, reason: '你们已经是恋人了' };
-  if (st.rel < 70) return { ok: false, reason: '好感不足 70' };
+  if (st.romance < 60) return { ok: false, reason: '浪漫值不足 60' };
+  if (st.friendship < 40) return { ok: false, reason: '友谊不足 40（先成为好朋友）' };
   if (st.dates < 3) return { ok: false, reason: `约会次数不足（${st.dates}/3）` };
   return { ok: true };
 }
 function confess(G, id, forcedRoll) {
   const npc = D().NPCS.find(n => n.id === id);
   const st = G.npcs[id];
-  const p = 0.35 + st.rel / 250 + G.player.charm / 300;
+  const p = 0.35 + st.romance / 250 + st.friendship / 500 + G.player.charm / 300;
   const roll = (forcedRoll !== undefined) ? forcedRoll : G.rng();
   if (roll < p) {
     st.stage = 'lover';
-    st.rel = Math.min(100, st.rel + 5);
+    st.romance = Math.min(100, st.romance + 5);
     logEvent(G, 'confess', `你向${npc.name}表白，TA 红着耳朵点了头。你们在一起了！`);
     return { ok: true, success: true, text: `「我也是。」${npc.name}低下头，轻轻牵住了你的手。` };
   }
-  st.rel = Math.max(0, st.rel - 15);
+  st.romance = Math.max(0, st.romance - 15);
   st.cooldownUntil = G.day + 7;
   logEvent(G, 'confessFail', `你向${npc.name}表白，TA 说再给点时间。`);
   return { ok: true, success: false, text: '「对不起……我们再相处看看吧。」气氛有点尴尬。' };
@@ -284,18 +359,19 @@ function confess(G, id, forcedRoll) {
 function canPropose(G, id) {
   const st = G.npcs[id];
   if (st.stage !== 'lover') return { ok: false, reason: '还不是恋人' };
-  if (st.rel < 90) return { ok: false, reason: '好感不足 90' };
+  if (st.romance < 90) return { ok: false, reason: '浪漫值不足 90' };
+  if (st.friendship < 60) return { ok: false, reason: '友谊不足 60' };
   if (G.player.ring < 1) return { ok: false, reason: '需要一枚戒指（商场有售 2000 元）' };
   return { ok: true };
 }
 function propose(G, id, forcedRoll) {
   const npc = D().NPCS.find(n => n.id === id);
   const st = G.npcs[id];
-  const p = st.rel >= 95 ? 0.95 : 0.75;
+  const p = st.romance >= 95 ? 0.95 : 0.75;
   const roll = (forcedRoll !== undefined) ? forcedRoll : G.rng();
   if (roll < p) {
     G.player.ring = 0;
-    st.stage = 'spouse'; st.rel = 100;
+    st.stage = 'spouse'; st.romance = 100; st.friendship = Math.max(st.friendship, 80);
     G.spouseId = id; G.marriageDay = G.day;
     logEvent(G, 'wedding', `你和${npc.name}在亲友的祝福中结了婚。`);
     return { accepted: true, text: `「我愿意。」${npc.name}戴上了戒指，眼里有泪光。婚礼那天，全世界都在为你们发光。` };
@@ -309,7 +385,7 @@ function tryBaby(G) {
   if (!G.spouseId) return { ok: false, reason: '先找个对象结婚吧' };
   if (G.child || G.pregnant) return { ok: false, reason: '已经有小家伙啦' };
   const st = G.npcs[G.spouseId];
-  if (st.rel < 60) return { ok: false, reason: '最近感情有点冷淡，先升温一下' };
+  if (st.romance < 60) return { ok: false, reason: '最近感情有点冷淡，先升温一下' };
   if (G.player.money < 2000) return { ok: false, reason: '至少需要 2000 元养育基金' };
   G.pregnant = true;
   G.dueDay = G.day + PREGNANT_DAYS;
@@ -400,7 +476,7 @@ function applyFx(stats, fx) {
 // ---------- 结局 ----------
 function evaluateEnding(G) {
   const married = !!G.spouseId;
-  const spouseRel = married ? G.npcs[G.spouseId].rel : 0;
+  const spouseRel = married ? G.npcs[G.spouseId].romance : 0;
   let childPath = null, childScore = 50;
   if (G.child) {
     const s = G.child.stats, f = G.child.flags;
@@ -457,7 +533,8 @@ function studyLibrary(G) {
   if (G.player.energy < 15) return { ok: false, reason: '看不进去书了（体力不足）' };
   G.player.energy -= 15;
   addMinutes(G, 120);
-  G.player.talent = Math.min(100, G.player.talent + 2);
+  G.player.talent = Math.min(100, G.player.talent + (traitFx(G, 'studyBonus') > 1 ? 4 : 2));
+  G.player.needs.fun = Math.min(100, G.player.needs.fun + 6);
   G.player.mood = Math.min(100, G.player.mood + 2);
   return { ok: true, text: '你在书架间泡了一下午，感觉脑子清醒了不少。' };
 }
@@ -465,7 +542,8 @@ function gymTrain(G) {
   if (G.player.energy < 20) return { ok: false, reason: '举不动了（体力不足）' };
   G.player.energy -= 20;
   addMinutes(G, 90);
-  G.player.charm = Math.min(100, G.player.charm + 2);
+  G.player.charm = Math.min(100, G.player.charm + (traitFx(G, 'gymBonus') > 1 ? 4 : 2));
+  G.player.needs.fun = Math.min(100, G.player.needs.fun + 12);
   G.player.mood = Math.min(100, G.player.mood + 3);
   return { ok: true, text: '出了一身汗，整个人都精神了。' };
 }
@@ -528,7 +606,7 @@ const core = {
   askDate, resolveDate, canConfess, confess, canPropose, propose,
   tryBaby, deliverBaby, childAgeYears, checkMilestone, applyParenting, evaluateEnding,
   doWork, canLevelUp, studyLibrary, gymTrain, eatFood,
-  exprForEvent, buildScript,
+  exprForEvent, buildScript, decayNeeds, moodOf, doRomantic, traitFx,
   YEAR_DAYS, START_AGE, MAX_AGE_DAYS,
 };
 
