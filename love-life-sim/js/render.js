@@ -244,31 +244,91 @@ let groundMesh = null, roofGroup = null, npcGroups = new Map(), playerGroup = nu
 const lampLights = [];
 
 function init3D(canvas) {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(1);
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(canvas.width, canvas.height, false);
+  // ===== 物理渲染管线（照片级） =====
+  renderer.outputEncoding = THREE.sRGBEncoding;            // sRGB 色彩空间输出
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;      // 电影级色调映射
+  renderer.toneMappingExposure = 1.05;                     // 曝光
+  renderer.physicallyCorrectLights = true;                 // 物理光照单位
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;        // 软阴影
   scene = new THREE.Scene();
   camera3 = new THREE.PerspectiveCamera(70, canvas.width / canvas.height, 0.05, 80);
-  hemi = new THREE.HemisphereLight(0xbfd9f2, 0x5a6a4f, 0.95);
+  hemi = new THREE.HemisphereLight(0xbfd9f2, 0x5a6a4f, 0.9);
   scene.add(hemi);
-  sun = new THREE.DirectionalLight(0xfff2d5, 1.0);
+  sun = new THREE.DirectionalLight(0xfff2d5, 2.2);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.radius = 3;                                   // 阴影柔边
   sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
   sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
   sun.shadow.camera.far = 60;
   sun.shadow.bias = -0.0004;
   scene.add(sun); scene.add(sun.target);
   scene.fog = new THREE.Fog(0xcfe2f2, 14, 46);
+  // 环境反射贴图（程序化天空 → PMREM）
+  if (!envMap) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    const skyGeo = new THREE.SphereGeometry(50, 16, 12);
+    const skyMat = new THREE.MeshBasicMaterial({ color: 0xbfd9f2, side: THREE.BackSide });
+    envScene.add(new THREE.Mesh(skyGeo, skyMat));
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(6), new THREE.MeshBasicMaterial({ color: 0xfff5dd }));
+    glow.position.set(15, 20, 10);
+    envScene.add(glow);
+    envMap = pmrem.fromScene(envScene, 0.04).texture;
+    pmrem.dispose();
+  }
+  scene.environment = envMap;
 }
+let envMap = null;
 
 function canvasTex(c) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 4;
+  t.anisotropy = 8;
+  t.encoding = THREE.sRGBEncoding;
   return t;
+}
+// 高度图（画布亮度）→ 法线贴图（Sobel 梯度），照片级凹凸质感的核心
+function heightToNormal(c, strength) {
+  const w = c.width, h = c.height;
+  const src = c.getContext('2d').getImageData(0, 0, w, h).data;
+  const out = makeCanvas(w, h), octx = out.getContext('2d');
+  const img = octx.createImageData(w, h);
+  const lum = (x, y) => {
+    x = (x + w) % w; y = (y + h) % h;
+    const i = (y * w + x) * 4;
+    return (src[i] * 0.3 + src[i + 1] * 0.5 + src[i + 2] * 0.2) / 255;
+  };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = (lum(x + 1, y) - lum(x - 1, y)) * strength;
+    const dy = (lum(x, y + 1) - lum(x, y - 1)) * strength;
+    const len = Math.sqrt(dx * dx + dy * dy + 1);
+    const i = (y * w + x) * 4;
+    img.data[i] = ((-dx / len) * 0.5 + 0.5) * 255;
+    img.data[i + 1] = ((-dy / len) * 0.5 + 0.5) * 255;
+    img.data[i + 2] = ((1 / len) * 0.5 + 0.5) * 255;
+    img.data[i + 3] = 255;
+  }
+  octx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(out);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  return t;
+}
+// PBR 材质（凹凸 + 粗糙度）
+function pbrMat(colorTex, normalTex, roughness, metalness, normalScale) {
+  const m = new THREE.MeshStandardMaterial({
+    map: colorTex ? canvasTex(colorTex) : null,
+    normalMap: normalTex || null,
+    roughness: roughness === undefined ? 0.9 : roughness,
+    metalness: metalness === undefined ? 0 : metalness,
+  });
+  if (normalTex) m.normalScale = new THREE.Vector2(normalScale || 1, normalScale || 1);
+  return m;
 }
 
 function buildWorld3D(world, D) {
@@ -276,13 +336,17 @@ function buildWorld3D(world, D) {
   scene.add(hemi); scene.add(sun); scene.add(sun.target);
   npcGroups = new Map(); lampLights.length = 0;
 
-  // 地面
-  const gTex = canvasTex(buildGroundTexture());
+  // 地面（PBR：草地/路面法线凹凸）
+  const gCanvas = buildGroundTexture();
+  const gTex = canvasTex(gCanvas);
   gTex.magFilter = THREE.LinearFilter;
-  groundMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(32, 32),
-    new THREE.MeshLambertMaterial({ map: gTex })
-  );
+  const groundMat = new THREE.MeshStandardMaterial({
+    map: gTex,
+    normalMap: heightToNormal(gCanvas, 2.2),
+    roughness: 0.95, metalness: 0,
+  });
+  groundMat.normalScale = new THREE.Vector2(1.4, 1.4);
+  groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(32, 32), groundMat);
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.set(16, 0, 16);
   groundMesh.receiveShadow = true;
@@ -300,7 +364,15 @@ function buildWorld3D(world, D) {
   const geo = new THREE.BoxGeometry(1, 1, 1);
   for (const t in wallData) {
     const list = wallData[t];
-    const mat = new THREE.MeshLambertMaterial({ map: canvasTex(texes[t] || texes[1]) });
+    // PBR 墙面：颜色 + 法线（砖缝/木纹真实凹凸）+ 材质粗糙度差异
+    const texCanvas = texes[t] || texes[1];
+    const nrm = heightToNormal(texCanvas, t === '3' ? 1.2 : 2.6);
+    const rough = t === '3' ? 0.25 : t === '8' ? 0.5 : t === '4' ? 0.8 : 0.88;   // 玻璃光滑 / 医院半光 / 砖木粗糙
+    const mat = new THREE.MeshStandardMaterial({
+      map: canvasTex(texCanvas), normalMap: nrm,
+      roughness: rough, metalness: t === '3' ? 0.35 : 0.04,
+    });
+    mat.normalScale = new THREE.Vector2(1.5, 1.5);
     const im = new THREE.InstancedMesh(geo, mat, list.length);
     const m = new THREE.Matrix4();
     list.forEach(([x, y], i) => {
@@ -318,7 +390,7 @@ function buildWorld3D(world, D) {
   for (const [x, y, w, h, t] of rects) {
     const roof = new THREE.Mesh(
       new THREE.BoxGeometry(w + 0.3, 0.12, h + 0.3),
-      new THREE.MeshLambertMaterial({ color: roofColors[t] || 0x777777 })
+      new THREE.MeshStandardMaterial({ color: roofColors[t] || 0x777777, roughness: 0.85 })
     );
     roof.position.set(x + w / 2, 1.04, y + h / 2);
     roof.castShadow = true; roof.receiveShadow = true;
@@ -329,9 +401,9 @@ function buildWorld3D(world, D) {
   // 树木（干 + 冠 Instanced）
   const trees = world.props.filter(p => p.type === 'tree');
   const trunkGeo = new THREE.CylinderGeometry(0.07, 0.1, 0.5, 6);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6a4a2b });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6a4a2b, roughness: 0.9 });
   const crownGeo = new THREE.SphereGeometry(0.42, 8, 6);
-  const crownMat = new THREE.MeshLambertMaterial({ color: 0x3f7f4d });
+  const crownMat = new THREE.MeshStandardMaterial({ color: 0x3f7f4d, roughness: 0.85 });
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, trees.length);
   const crowns = new THREE.InstancedMesh(crownGeo, crownMat, trees.length);
   const m = new THREE.Matrix4();
@@ -346,7 +418,7 @@ function buildWorld3D(world, D) {
 
   // 路灯（杆 + 发光灯头 + 夜间点光）
   for (const p of world.props.filter(pp => pp.type === 'lamp')) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.1, 6), new THREE.MeshLambertMaterial({ color: 0x3a3a44 }));
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0x3a3a44, roughness: 0.5, metalness: 0.6 }));
     pole.position.set(p.x, 0.55, p.y); pole.castShadow = true;
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff2b0 }));
     bulb.position.set(p.x, 1.12, p.y);
@@ -358,7 +430,7 @@ function buildWorld3D(world, D) {
 
   // 家具道具（组合盒）
   function box(w, h, d, color, x, y, z, parent) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05 }));
     b.position.set(x, y, z); b.castShadow = true; b.receiveShadow = true;
     parent.add(b); return b;
   }
@@ -374,7 +446,7 @@ function buildWorld3D(world, D) {
     else if (p.type === 'bench') { box(0.9, 0.06, 0.3, 0x8a6a4a, 0, 0.28, 0, g); box(0.06, 0.28, 0.06, 0x5a4530, -0.38, 0.14, 0.1, g); box(0.06, 0.28, 0.06, 0x5a4530, 0.38, 0.14, 0.1, g); }
     else if (p.type === 'fountain') {
       box(1.4, 0.3, 1.4, 0x8a92a0, 0, 0.15, 0, g);
-      const water = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.06, 16), new THREE.MeshLambertMaterial({ color: 0x5aa8d5, transparent: true, opacity: 0.85 }));
+      const water = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.06, 16), new THREE.MeshStandardMaterial({ color: 0x5aa8d5, transparent: true, opacity: 0.8, roughness: 0.05, metalness: 0.1 }));
       water.position.y = 0.32; g.add(water);
       box(0.12, 0.5, 0.12, 0x8a92a0, 0, 0.45, 0, g);
     }
@@ -422,12 +494,19 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 // ---------- 3D 人物（精细建模：五官 + 表情 + 身形） ----------
-// 部件几何/材质缓存（共享，降低创建开销）
+// 部件几何/材质缓存（共享，降低创建开销）——PBR 质感
 const P_CACHE = {};
 function pgeo(key, make) { if (!P_CACHE[key]) P_CACHE[key] = make(); return P_CACHE[key]; }
 function pmat(key, color) {
   const k = key + color;
-  if (!P_CACHE[k]) P_CACHE[k] = new THREE.MeshLambertMaterial({ color: new THREE.Color(color) });
+  if (!P_CACHE[k]) {
+    const opt = { color: new THREE.Color(color), roughness: 0.85, metalness: 0 };
+    if (key === 'skin') { opt.roughness = 0.42; opt.metalness = 0; }        // 皮肤：微光泽次表面近似
+    else if (key === 'hair') { opt.roughness = 0.36; opt.metalness = 0.12; } // 头发：角蛋白光泽
+    else if (key === 'top') { opt.roughness = 0.92; }                        // 布料：高粗糙
+    else if (key === 'shoe') { opt.roughness = 0.3; opt.metalness = 0.05; }  // 皮鞋
+    P_CACHE[k] = new THREE.MeshStandardMaterial(opt);
+  }
   return P_CACHE[k];
 }
 
@@ -776,7 +855,7 @@ function makeBallTexture() {
 function addBall(x, y) {
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(0.09, 16, 12),
-    new THREE.MeshLambertMaterial({ map: makeBallTexture() })
+    new THREE.MeshStandardMaterial({ map: canvasTex(makeBallTexture()), roughness: 0.25, metalness: 0.05 })
   );
   mesh.castShadow = true;
   mesh.position.set(x, 0.09, y);
