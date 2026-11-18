@@ -155,7 +155,8 @@ document.querySelectorAll('.gender-btn').forEach(b => b.addEventListener('click'
   }
 })();
 
-$('btn-start').addEventListener('click', () => {
+$('btn-start').addEventListener('click', function () {
+  this.blur();   // 防止后续 Space 再次触发按钮
   const name = $('player-name').value.trim() || '阿哲';
   startGame(name, playerGender);
 });
@@ -163,6 +164,7 @@ $('btn-start').addEventListener('click', () => {
 window.addEventListener('keydown', e => {
   if (!running) return;
   const tag = (e.target && e.target.tagName) === 'INPUT';
+  if (e.key === ' ') e.preventDefault();   // 防页面滚动/按钮激活
   keys[e.key.toLowerCase()] = true;
   if (tag) return;
   if (e.key === 'Escape') {
@@ -231,7 +233,11 @@ function startGame(name, gender) {
   window.__playerGender = gender;
   Render.init3D(scene);
   Render.buildWorld3D(world, D);
-  player = { x: 5.5, y: 6.5 };
+  window.__worldMap = world.map;            // 球物理的墙检测
+  Render.clearBalls();
+  Render.addBall(12.5, 19.3);               // 广场足球（喷泉旁空地）
+  Render.addBall(10.5, 27.5);               // 公园足球
+  player = { x: 5.5, y: 6.5, vx: 0, vy: 0, h: 0, vh: 0, onGround: true, stance: 'stand', squash: 0 };
   cam = { x: 5.5, y: 6.5, a: Math.PI / 2, pitch: 0 };
   viewMode = 'first';
   lastZoneId = 'home'; lastDay = 0;
@@ -286,34 +292,95 @@ function loop(t) {
   if (pg) {
     pg.visible = viewMode === 'third' && camDist > 0.75;
     if (pg.visible) {
-      Render.syncPerson3D(pg, { x: player.x, y: player.y, yaw: cam.a, moving: movedThisFrame, walkT, waving: waving > 0, showName: false });
+      Render.syncPerson3D(pg, {
+        x: player.x, y: player.y, yaw: cam.a, moving: movedThisFrame, walkT, waving: waving > 0,
+        stance: player.stance, h: player.h, airborne: !player.onGround, squash: player.squash,
+        showName: false,
+      });
     }
   }
-  // 孩子跟随名牌
-  if (world.childLive && Render.playerGroup) { /* 孩子由 childLive 简化展示：复用玩家模型逻辑省略 */ }
-  Render.frame3D({ x: cam.x, y: cam.y, a: cam.a, pitch: (cam.pitch || 0) * 0.011, mode: viewMode, dist: camDist, shoulder: camShoulder }, G.minutes);
+  // 足球物理
+  Render.updateBalls(dt, player, world, world.npcLive);
+  // 视角参数：姿态决定眼高 + 走路摆动
+  const eyeH = player.stance === 'prone' ? 0.2 : player.stance === 'crouch' ? 0.34 : 0.56;
+  const thirdH = player.stance === 'prone' ? 0.75 : player.stance === 'crouch' ? 1.05 : 1.45;
+  const bob = (movedThisFrame && player.onGround) ? Math.sin(walkT * Math.PI * 2) * 0.02 : 0;
+  Render.frame3D({ x: cam.x, y: cam.y, a: cam.a, pitch: (cam.pitch || 0) * 0.011, mode: viewMode, dist: camDist, shoulder: camShoulder, eyeH, thirdH, bob }, G.minutes);
   updateHud();
   updateInteractTip();
   requestAnimationFrame(loop);
 }
 
-// FPS 移动：W/S 前后，A/D 侧移，Shift 奔跑；朝向由鼠标控制
+// FPS 物理：W/S 前后，A/D 侧移，Shift 奔跑；Space 跳跃，C 下蹲，Z 趴下；惯性移动 + 重力
+const GRAV = 13;
 function updatePlayer(dt) {
-  const run = !!(keys['shift'] && !keys['control']);
-  const sp = (run ? 3.5 : 2.1) * dt;
+  // 姿态：C 按住下蹲；Z 切换趴下（趴下时按 C/W 自动起身）
+  if (keys['z'] && !updatePlayer._zHeld) {
+    updatePlayer._zHeld = true;
+    if (player.stance === 'prone' || player.stance === 'crouch') player.stance = 'stand';
+    else if (player.onGround) player.stance = 'prone';
+  }
+  if (!keys['z']) updatePlayer._zHeld = false;
+  if (keys['c'] && player.stance !== 'prone' && player.onGround) player.stance = 'crouch';
+  else if (!keys['c'] && player.stance === 'crouch') player.stance = 'stand';
+  if (player.stance === 'prone' && (keys['w'] || keys['shift']) && keys['c']) player.stance = 'stand';
+
+  // 跳跃（站立/下蹲可跳，趴下不可）
+  if (keys[' '] && player.onGround && player.stance !== 'prone') {
+    player.vh = player.stance === 'crouch' ? 3.2 : 4.3;
+    player.onGround = false;
+    if (player.stance === 'crouch') player.stance = 'stand';
+    sfx.ui();
+  }
+  // 重力积分
+  if (!player.onGround) {
+    player.vh -= GRAV * dt;
+    player.h += player.vh * dt;
+    if (player.h <= 0) {
+      player.h = 0;
+      player.onGround = true;
+      if (player.vh < -3.2) { player.squash = 1; sfx.bad(); }   // 重落地压缩
+      player.vh = 0;
+    }
+  }
+  if (player.squash > 0) player.squash = Math.max(0, player.squash - dt * 4.5);
+
+  // 惯性移动（目标速度 → 加速逼近）
+  const stanceSpd = player.stance === 'prone' ? 0.55 : player.stance === 'crouch' ? 1.05 : 2.1;
+  const run = !!(keys['shift'] && player.stance === 'stand');
+  const maxSpd = run ? 3.5 : stanceSpd;
+  const airCtrl = player.onGround ? 1 : 0.35;
+  const sp = maxSpd * airCtrl;
   const cos = Math.cos(cam.a), sin = Math.sin(cam.a);
-  let mx = 0, my = 0;
-  if (keys['w'] || keys['arrowup']) { mx += cos * sp; my += sin * sp; }
-  if (keys['s'] || keys['arrowdown']) { mx -= cos * sp * 0.8; my -= sin * sp * 0.8; }
-  if (keys['a'] || keys['arrowleft']) { mx += sin * sp * 0.85; my -= cos * sp * 0.85; }
-  if (keys['d'] || keys['arrowright']) { mx -= sin * sp * 0.85; my += cos * sp * 0.85; }
-  movedThisFrame = (mx !== 0 || my !== 0);
+  let tx = 0, ty = 0;
+  if (keys['w'] || keys['arrowup']) { tx += cos * sp; ty += sin * sp; }
+  if (keys['s'] || keys['arrowdown']) { tx -= cos * sp * 0.8; ty -= sin * sp * 0.8; }
+  if (keys['a'] || keys['arrowleft']) { tx += sin * sp * 0.85; ty -= cos * sp * 0.85; }
+  if (keys['d'] || keys['arrowright']) { tx -= sin * sp * 0.85; ty += cos * sp * 0.85; }
+  const accel = player.onGround ? 11 : 3.5;
+  const k = Math.min(1, dt * accel);
+  player.vx += (tx - player.vx) * k;
+  player.vy += (ty - player.vy) * k;
+  const speed = Math.hypot(player.vx, player.vy);
+  movedThisFrame = speed > 0.25;
   runningThisFrame = run && movedThisFrame;
   if (movedThisFrame) {
-    if (!blocked(player.x + mx, player.y)) player.x += mx;
-    if (!blocked(player.x, player.y + my)) player.y += my;
-    walkT += dt * (run ? 11 : 7.5);
-  } else walkT = 0;
+    const nx = player.x + player.vx * dt, ny = player.y + player.vy * dt;
+    let bx = false, by = false;
+    if (!blocked(nx, player.y)) player.x = nx; else { player.vx = 0; bx = true; }
+    if (!blocked(player.x, ny)) player.y = ny; else { player.vy = 0; by = true; }
+    // NPC 推挤：撞到人把 TA 轻轻推开
+    for (const nl of world.npcLive) {
+      if (nl.hidden) continue;
+      const dx = nl.x - player.x, dy = nl.y - player.y, d = Math.hypot(dx, dy);
+      if (d < 0.34 && d > 0.001) {
+        nl.x += dx / d * 0.05; nl.y += dy / d * 0.05;
+        if (!nl.expr) setNpcExpr(nl.id, 'sad', 1.2);
+      }
+    }
+    walkT += dt * (run ? 11 : player.stance === 'prone' ? 5 : 7.5);
+  } else { player.vx *= Math.pow(0.02, dt); player.vy *= Math.pow(0.02, dt); walkT = 0; }
+
   // 区域横幅
   const z = D.zoneAt(Math.floor(player.x), Math.floor(player.y));
   const zid = z ? z.id : 'street';
@@ -1210,8 +1277,14 @@ window.__xd = {
   cam: () => ({ x: player.x, y: player.y, a: cam.a, pitch: cam.pitch, viewMode }),
   look: handleMouseLook,
   setView: m => { viewMode = m; },
-  teleport: (x, y, a) => { player.x = x; player.y = y; if (a !== undefined) cam.a = a; },
+  teleport: (x, y, a) => {
+    if (blocked(x, y)) return '目标点被阻挡';
+    player.x = x; player.y = y; if (a !== undefined) cam.a = a;
+    return 'ok';
+  },
   npc: id => world.npcLive.find(n => n.id === id),
+  playerState: () => ({ x: player.x, y: player.y, h: player.h, onGround: player.onGround, stance: player.stance, squash: player.squash, vx: player.vx, vy: player.vy }),
+  setKey: (k, v) => { keys[k] = v; },
   talkTo: id => { const nl = world.npcLive.find(n => n.id === id); if (nl) { nl.hidden = false; openDialog(nl); } },
   start: (name, gender) => startGame(name, gender),
   morning: () => morningProcess([]),

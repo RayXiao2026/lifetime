@@ -499,17 +499,22 @@ function makePerson3D(style, gender) {
   // 刘海
   head.add(part(pgeo('bang', () => new THREE.BoxGeometry(0.13, 0.028, 0.02)), hairM, 0, 0.052, 0.058));
   const hs = style.hairStyle;
+  const swayParts = [];
   if (hs === 'long') {
     const back = part(pgeo('hlong', () => new THREE.SphereGeometry(0.088, 14, 12)), hairM, 0, -0.09, -0.012);
     back.scale.set(1, 1.9, 0.85);
     head.add(back);
+    swayParts.push(back);
     head.add(part(pgeo('hside', () => new THREE.SphereGeometry(0.026, 8, 8)), hairM, -0.082, -0.03, 0.03));
     head.add(part(pgeo('hside', () => new THREE.SphereGeometry(0.026, 8, 8)), hairM, 0.082, -0.03, 0.03));
   } else if (hs === 'ponytail') {
-    const pt = part(pgeo('hpt1', () => new THREE.SphereGeometry(0.024, 8, 8)), hairM, 0, -0.02, -0.09);
+    const pt = new THREE.Group();
+    pt.position.set(0, -0.02, -0.09);
+    pt.add(part(pgeo('hpt1', () => new THREE.SphereGeometry(0.024, 8, 8)), hairM, 0, 0, 0));
+    pt.add(part(pgeo('hpt2', () => new THREE.SphereGeometry(0.02, 8, 8)), hairM, 0, -0.05, -0.01));
+    pt.add(part(pgeo('hpt3', () => new THREE.SphereGeometry(0.015, 8, 8)), hairM, 0, -0.09, -0.005));
     head.add(pt);
-    head.add(part(pgeo('hpt2', () => new THREE.SphereGeometry(0.02, 8, 8)), hairM, 0, -0.07, -0.1));
-    head.add(part(pgeo('hpt3', () => new THREE.SphereGeometry(0.015, 8, 8)), hairM, 0, -0.11, -0.095));
+    swayParts.push(pt);
   } else if (hs === 'bob') {
     const back = part(pgeo('hbob', () => new THREE.SphereGeometry(0.089, 14, 12)), hairM, 0, -0.035, -0.01);
     back.scale.set(1, 1.35, 0.9);
@@ -544,6 +549,7 @@ function makePerson3D(style, gender) {
     const skirt = new THREE.Mesh(pgeo('skirt', () => new THREE.CylinderGeometry(0.105, 0.155, 0.12, 12)), bottom);
     skirt.position.set(0, 0.215, 0); skirt.castShadow = true;
     g.add(skirt);
+    swayParts.push(skirt);
   }
   // 手臂（肩部 pivot + 球形手）
   const armGeo = pgeo('arm', () => new THREE.BoxGeometry(0.055, 0.24, 0.055));
@@ -559,7 +565,7 @@ function makePerson3D(style, gender) {
     legL, legR, armL, armR, head,
     eyeL, eyeR, browL, browR,
     mouthSmile, mouthOpen, mouthSad, blushL, blushR,
-    walkT: 0,
+    swayParts, walkT: 0,
   };
   applyExpr(g, 'normal');
   return g;
@@ -593,27 +599,71 @@ function applyExpr(g, expr) {
   u.head.rotation.x = shy ? 0.18 : 0;
 }
 
-// 同步人物动画：state = {x, y, yaw, moving, walkT, waving, expr}
+// 同步人物动画：state = {x, y, yaw, moving, walkT, waving, expr, stance, airborne, squash}
+// stance: stand | crouch | prone；airborne 跳跃中；squash 落地压缩量(0-1)
 function syncPerson3D(g, st) {
-  g.position.set(st.x, 0, st.y);
+  const u = g.userData;
+  const stance = st.stance || 'stand';
+  const airborne = !!st.airborne;
+  // 位置：离地高度（跳跃/趴下）
+  const baseY = stance === 'prone' ? 0.09 : stance === 'crouch' ? 0.0 : 0;
+  g.position.set(st.x, baseY + (st.h || 0), st.y);
   g.rotation.y = Math.PI / 2 - st.yaw;
-  const w = st.moving ? Math.sin(st.walkT * Math.PI) : 0;
-  g.userData.legL.rotation.x = w * 0.7;
-  g.userData.legR.rotation.x = -w * 0.7;
-  g.userData.armL.rotation.x = -w * 0.55;
-  if (st.waving) {
-    g.userData.armR.rotation.x = 0;
-    g.userData.armR.rotation.z = -2.4 + Math.sin(st.walkT * 6) * 0.25;   // 举臂挥手
+
+  // 落地压缩（squash-and-stretch）
+  const squash = st.squash || 0;
+  const syq = 1 - squash * 0.28, sxq = 1 + squash * 0.18;
+  if (stance === 'prone') {
+    g.rotation.x = 1.42;                    // 趴下：身体贴地前倾
+    g.scale.set(sxq, syq * 0.9, 1);
+  } else if (stance === 'crouch') {
+    g.rotation.x = 0.18;                    // 下蹲：身体微前倾 + 整体压低
+    g.scale.set(sxq * 1.02, syq * 0.68, 1);
   } else {
-    g.userData.armR.rotation.z = 0;
-    g.userData.armR.rotation.x = w * 0.55;
+    g.rotation.x = 0;
+    g.scale.set(sxq, syq, 1);
   }
-  // 呼吸/走路轻微起伏
-  g.position.y = st.moving ? Math.abs(Math.sin(st.walkT * Math.PI)) * 0.012 : Math.sin((st.walkT || 0) * 0.8) * 0.002;
+
+  // 肢体动画
+  let w = st.moving ? Math.sin(st.walkT * Math.PI) : 0;
+  if (airborne) {                            // 跳跃：收腿张臂
+    u.legL.rotation.x = 0.55; u.legR.rotation.x = -0.35;
+    u.armL.rotation.x = -0.7; u.armR.rotation.x = -0.7;
+    u.armL.rotation.z = 0.5; u.armR.rotation.z = -0.5;
+  } else if (stance === 'prone') {           // 趴下：四肢平伸划动（匍匐爬行）
+    const crawl = st.moving ? Math.sin(st.walkT * Math.PI * 2) : 0;
+    u.legL.rotation.x = 0.15 + crawl * 0.25; u.legR.rotation.x = 0.15 - crawl * 0.25;
+    u.armL.rotation.x = -1.2 + crawl * 0.35; u.armR.rotation.x = -1.2 - crawl * 0.35;
+    u.armL.rotation.z = 0.25; u.armR.rotation.z = -0.25;
+  } else if (stance === 'crouch') {          // 下蹲：屈膝小碎步
+    u.legL.rotation.x = 0.85 + w * 0.35; u.legR.rotation.x = 0.85 - w * 0.35;
+    u.armL.rotation.x = -0.35 - w * 0.3; u.armR.rotation.x = -0.35 + w * 0.3;
+    u.armL.rotation.z = 0.3; u.armR.rotation.z = -0.3;
+  } else {                                   // 站立行走
+    u.legL.rotation.x = w * 0.7;
+    u.legR.rotation.x = -w * 0.7;
+    u.armL.rotation.x = -w * 0.55;
+    u.armL.rotation.z = 0;
+    if (st.waving) {
+      u.armR.rotation.x = 0;
+      u.armR.rotation.z = -2.4 + Math.sin(st.walkT * 6) * 0.25;
+    } else {
+      u.armR.rotation.z = 0;
+      u.armR.rotation.x = w * 0.55;
+    }
+  }
+
+  // 呼吸/走路起伏
+  if (!airborne && stance === 'stand') {
+    g.position.y += st.moving ? Math.abs(Math.sin(st.walkT * Math.PI)) * 0.012 : Math.sin((st.walkT || 0) * 0.8) * 0.002;
+  }
+  // 发/裙摆物理摆动（速度驱动 + 惯性后飘）
+  if (u.swayParts && u.swayParts.length) {
+    const sway = w * 0.16 + (st.moving ? 0.1 : 0) + Math.sin((st.walkT || 0) * 2.2) * 0.03;
+    for (const sp of u.swayParts) sp.rotation.x = sway;
+  }
   applyExpr(g, st.expr || 'normal');
-  if (g.userData.nameSprite) {
-    g.userData.nameSprite.visible = st.showName !== false;
-  }
+  if (u.nameSprite) u.nameSprite.visible = st.showName !== false;
 }
 
 // ---------- 昼夜光照 ----------
@@ -637,20 +687,103 @@ function setDaylight(minutes) {
   for (const pl of lampLights) pl.intensity = lampI * 0.9;
 }
 
+// ---------- 可踢足球（重力/反弹/滚动/碰撞物理） ----------
+const balls = [];
+function makeBallTexture() {
+  const c = makeCanvas(64, 32), ctx = c.getContext('2d');
+  px(ctx, 0, 0, 64, 32, '#f2f2f2');
+  ctx.fillStyle = '#2b2b30';
+  for (let i = 0; i < 10; i++) {
+    const x = (i % 5) * 13 + (i > 4 ? 6 : 0), y = i > 4 ? 20 : 6;
+    ctx.beginPath();
+    for (let k = 0; k < 5; k++) {
+      const a = k / 5 * Math.PI * 2 - Math.PI / 2;
+      const px_ = x + Math.cos(a) * 4, py_ = y + Math.sin(a) * 4;
+      k === 0 ? ctx.moveTo(px_, py_) : ctx.lineTo(px_, py_);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  return t;
+}
+function addBall(x, y) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 16, 12),
+    new THREE.MeshLambertMaterial({ map: makeBallTexture() })
+  );
+  mesh.castShadow = true;
+  mesh.position.set(x, 0.09, y);
+  scene.add(mesh);
+  balls.push({ mesh, x, y, h: 0, vx: 0, vy: 0, vh: 0 });
+}
+function clearBalls() { for (const b of balls) scene.remove(b.mesh); balls.length = 0; }
+const GRAV_BALL = 9.5;
+function updateBalls(dt, player, world, npcs) {
+  for (const b of balls) {
+    // 重力与弹跳
+    b.vh -= GRAV_BALL * dt;
+    b.h += b.vh * dt;
+    if (b.h <= 0) {
+      b.h = 0;
+      if (b.vh < -0.9) { b.vh = -b.vh * 0.55; }     // 地面反弹衰减
+      else b.vh = 0;
+      // 滚动摩擦
+      b.vx *= Math.pow(0.35, dt); b.vy *= Math.pow(0.35, dt);
+    } else {
+      b.vx *= Math.pow(0.75, dt); b.vy *= Math.pow(0.75, dt);  // 空气阻力
+    }
+    const nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
+    // 墙反弹
+    if (wallAt3(nx, b.y)) b.vx = -b.vx * 0.6; else b.x = nx;
+    if (wallAt3(b.x, ny)) b.vy = -b.vy * 0.6; else b.y = ny;
+    // 玩家踢球（碰撞半径 + 玩家速度注入）
+    const dx = b.x - player.x, dy = b.y - player.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 0.28 && d > 0.001) {
+      const kick = 2.2 + Math.hypot(player.vx || 0, player.vy || 0) * 1.4 + (player.h > 0.05 ? 1.5 : 0);
+      b.vx = dx / d * kick + (player.vx || 0) * 0.6;
+      b.vy = dy / d * kick + (player.vy || 0) * 0.6;
+      if (b.h <= 0.02) b.vh = 2.2 + Math.random();
+    }
+    // NPC 轻推
+    if (npcs) for (const nl of npcs) {
+      if (nl.hidden) continue;
+      const ddx = b.x - nl.x, ddy = b.y - nl.y, dd = Math.hypot(ddx, ddy);
+      if (dd < 0.22 && dd > 0.001) {
+        b.vx = ddx / dd * 1.2; b.vy = ddy / dd * 1.2;
+        if (b.h <= 0.02) b.vh = 1.2;
+      }
+    }
+    b.mesh.position.set(b.x, 0.09 + b.h, b.y);
+    // 滚动自转
+    const speed = Math.hypot(b.vx, b.vy);
+    if (speed > 0.05) {
+      b.mesh.rotation.x += (b.vy * dt) / 0.09;
+      b.mesh.rotation.y -= (b.vx * dt) / 0.09;
+    }
+  }
+}
+function wallAt3(x, y) {
+  const m = (typeof window !== 'undefined' && window.__worldMap) ? window.__worldMap : null;
+  if (!m) return false;
+  return !!(m[Math.floor(y)] && m[Math.floor(y)][Math.floor(x)]);
+}
+
 // ---------- 帧渲染 ----------
-// camOpts: {x, y, a, pitch(rad), mode:'first'|'third', dist}
+// camOpts: {x, y, a, pitch(rad), mode:'first'|'third', dist, eyeH, thirdH, bob}
 function frame3D(camOpts, minutes) {
   setDaylight(minutes);
   const dirX = Math.cos(camOpts.a), dirY = Math.sin(camOpts.a);
   if (camOpts.mode === 'first') {
-    camera3.position.set(camOpts.x, 0.56, camOpts.y);
+    const eyeH = (camOpts.eyeH || 0.56) + (camOpts.bob || 0);
+    camera3.position.set(camOpts.x, eyeH, camOpts.y);
     const p = camOpts.pitch || 0;
-    camera3.lookAt(camOpts.x + dirX * Math.cos(p), 0.56 + Math.sin(p), camOpts.y + dirY * Math.cos(p));
+    camera3.lookAt(camOpts.x + dirX * Math.cos(p), eyeH + Math.sin(p), camOpts.y + dirY * Math.cos(p));
   } else {
     const d = camOpts.dist || 2.0, sh = camOpts.shoulder || 0.38;
     const eyeX = camOpts.x - dirX * d - dirY * sh, eyeY = camOpts.y - dirY * d + dirX * sh;
-    camera3.position.set(eyeX, 1.45, eyeY);
-    camera3.lookAt(camOpts.x + dirX * 0.6, 0.45, camOpts.y + dirY * 0.6);
+    camera3.position.set(eyeX, camOpts.thirdH || 1.45, eyeY);
+    camera3.lookAt(camOpts.x + dirX * 0.6, (camOpts.eyeH || 0.56) - 0.08, camOpts.y + dirY * 0.6);
   }
   renderer.render(scene, camera3);
 }
@@ -658,6 +791,7 @@ function frame3D(camOpts, minutes) {
 const Render = {
   RENDER_W: 720, RENDER_H: 405,
   init3D, buildWorld3D, frame3D, makePerson3D, syncPerson3D, setDaylight,
+  addBall, clearBalls, updateBalls, get balls() { return balls; },
   makePortrait, renderMinimap,
   get scene3D() { return scene; },
   get npcGroups() { return npcGroups; },
