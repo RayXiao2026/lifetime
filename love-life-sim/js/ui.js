@@ -7,7 +7,14 @@ const C = window.Core, D = window.DATA;
 // ---------- 全局状态 ----------
 let G = null;                 // 核心状态（core.createGame）
 let world = null;             // 世界运行时（地图/NPC活体/孩子）
-let cam = { x: 5.5, y: 6.5, a: Math.PI / 2 };
+let cam = { x: 5.5, y: 6.5, a: Math.PI / 2, pitch: 0 };  // 相机（yaw=a, pitch 为地平线像素偏移）
+let player = { x: 5.5, y: 6.5 };   // 玩家物理位置
+let playerImgs = null;        // 玩家精灵帧 [站,迈A,迈B,挥手]
+let viewMode = 'first';       // 'first' | 'third'
+let walkT = 0;                // 行走动画计时
+let waving = 0;               // 玩家挥手计时
+let locked = false;           // 鼠标指针锁定
+const LOOK_SENS = 0.0032, PITCH_SENS = 0.55;
 let keys = {};
 let timeFrac = 0;
 let lastZoneId = null;
@@ -83,7 +90,8 @@ function buildWorld() {
     npcLive: D.NPCS.map(n => ({
       id: n.id, name: n.name, role: n.role, gender: n.gender, npc: n,
       x: 0, y: 0, tx: 0, ty: 0, waitT: Math.random() * 2, hidden: true, zone: null,
-      img: Render.makePersonSprite(n.style),
+      imgs: [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(n.style, f)),
+      walkT: 0, moving: false, waving: false,
     })),
     childLive: null,
   };
@@ -152,10 +160,40 @@ window.addEventListener('keydown', e => {
     else tryInteract();
   }
   if (e.key.toLowerCase() === 'i') { renderStatus(); togglePanel('status'); }
-  if (e.key.toLowerCase() === 'm') { Render.renderMinimap(mctx, world, cam); togglePanel('map-panel'); }
+  if (e.key.toLowerCase() === 'm') { Render.renderMinimap(mctx, world, player, cam); togglePanel('map-panel'); }
   if (e.key.toLowerCase() === 'h') togglePanel('help');
+  if (e.key.toLowerCase() === 'v' && !e.repeat) {
+    viewMode = viewMode === 'first' ? 'third' : 'first';
+    document.body.classList.toggle('first-person', viewMode === 'first');
+    document.body.classList.toggle('third-person', viewMode === 'third');
+    notify(viewMode === 'third' ? '第三人称视角（能看到自己啦）' : '第一人称视角', 'good');
+    sfx.ui();
+  }
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// ---------- 鼠标视角（Pointer Lock，FPS 操作） ----------
+scene.addEventListener('click', () => {
+  if (running && !panelOpen() && !locked) scene.requestPointerLock();
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === scene;
+  document.body.classList.toggle('locked', locked);
+  document.body.classList.toggle('first-person', viewMode === 'first');
+  document.body.classList.toggle('third-person', viewMode === 'third');
+  const hint = $('lock-hint');
+  if (!locked && running && !panelOpen() && !G.ended) hint.classList.remove('hidden');
+  else hint.classList.add('hidden');
+});
+document.addEventListener('mousemove', e => {
+  if (!locked || !running || panelOpen()) return;
+  handleMouseLook(e.movementX || 0, e.movementY || 0);
+});
+function handleMouseLook(dx, dy) {
+  cam.a += dx * LOOK_SENS;
+  cam.pitch = Math.max(-80, Math.min(80, cam.pitch - dy * PITCH_SENS));
+}
+function exitLock() { if (document.pointerLockElement) document.exitPointerLock(); }
 
 function toggleOverlay(id) {
   const hidden = $(id).classList.contains('hidden');
@@ -167,51 +205,75 @@ function toggleOverlay(id) {
 function startGame(name, gender) {
   G = C.createGame({ name, gender });
   buildWorld();
-  cam = { x: 5.5, y: 6.5, a: Math.PI / 2 };
+  player = { x: 5.5, y: 6.5 };
+  playerImgs = [0, 1, 2, 'wave'].map(f => Render.makePersonSprite(PLAYER_STYLES[gender], f));
+  cam = { x: 5.5, y: 6.5, a: Math.PI / 2, pitch: 0 };
+  viewMode = 'first';
   lastZoneId = 'home'; lastDay = 0;
   $('title-screen').classList.add('hidden');
   $('game').classList.remove('hidden');
   const showDev = location.hash.indexOf('dev') >= 0;
   if (showDev) $('dev').classList.remove('hidden');
   running = true;
-  notify(`欢迎来到小镇，${name}！先出门认识些人吧（按 H 看玩法）`, 'good');
+  notify(`欢迎来到小镇，${name}！点击画面锁定鼠标视角（按 H 看玩法）`, 'good');
   updateHud();
   requestAnimationFrame(loop);
 }
 
 // ---------- 主循环 ----------
 let lastT = 0, dt = 0;
+let movedThisFrame = false, runningThisFrame = false;
 function loop(t) {
   if (!running) return;
   dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
   lastT = t;
+  if (panelOpen() && locked) exitLock();
   if (!G.ended && !panelOpen()) {
     updatePlayer(dt);
-    advanceTime(dt);
-  }
+    advanceTime(dt, movedThisFrame, runningThisFrame);
+  } else { movedThisFrame = false; }
+  if (waving > 0) { waving -= dt; if (waving <= 0) waving = 0; }
   if (!G.ended) {
     updateNpcZones();
     updateNpcs(dt);
     updateChildLive();
   }
-  Render.renderScene(sctx, world, cam, G.minutes);
+  // 相机（第三人称在玩家背后，遇墙收缩）
+  const camPos = cameraPos();
+  cam.x = camPos.x; cam.y = camPos.y;
+  const pitch = (viewMode === 'third' ? -52 : 0) + cam.pitch;
+  const opts = {};
+  if (viewMode === 'third') {
+    const frameIdx = movedThisFrame ? [0, 1, 0, 2][Math.floor(walkT) % 4] : 0;
+    const img = waving > 0 ? playerImgs[3] : playerImgs[frameIdx];
+    opts.playerSprite = { x: player.x, y: player.y, img };
+  }
+  opts.pitch = pitch;
+  Render.renderScene(sctx, world, cam, G.minutes, opts);
   updateHud();
   updateInteractTip();
   requestAnimationFrame(loop);
 }
 
+// FPS 移动：W/S 前后，A/D 侧移，Shift 奔跑；朝向由鼠标控制
 function updatePlayer(dt) {
-  const turn = (keys['a'] || keys['arrowleft'] ? -1 : 0) + (keys['d'] || keys['arrowright'] ? 1 : 0);
-  cam.a += turn * 2.4 * dt;
-  const fwd = (keys['w'] || keys['arrowup'] ? 1 : 0) + (keys['s'] || keys['arrowdown'] ? -1 : 0);
-  if (fwd !== 0) {
-    const sp = fwd * 2.1 * dt;
-    const nx = cam.x + Math.cos(cam.a) * sp, ny = cam.y + Math.sin(cam.a) * sp;
-    if (!blocked(nx, cam.y)) cam.x = nx;
-    if (!blocked(cam.x, ny)) cam.y = ny;
-  }
+  const run = !!(keys['shift'] && !keys['control']);
+  const sp = (run ? 3.5 : 2.1) * dt;
+  const cos = Math.cos(cam.a), sin = Math.sin(cam.a);
+  let mx = 0, my = 0;
+  if (keys['w'] || keys['arrowup']) { mx += cos * sp; my += sin * sp; }
+  if (keys['s'] || keys['arrowdown']) { mx -= cos * sp * 0.8; my -= sin * sp * 0.8; }
+  if (keys['a'] || keys['arrowleft']) { mx += sin * sp * 0.85; my -= cos * sp * 0.85; }
+  if (keys['d'] || keys['arrowright']) { mx -= sin * sp * 0.85; my += cos * sp * 0.85; }
+  movedThisFrame = (mx !== 0 || my !== 0);
+  runningThisFrame = run && movedThisFrame;
+  if (movedThisFrame) {
+    if (!blocked(player.x + mx, player.y)) player.x += mx;
+    if (!blocked(player.x, player.y + my)) player.y += my;
+    walkT += dt * (run ? 11 : 7.5);
+  } else walkT = 0;
   // 区域横幅
-  const z = D.zoneAt(Math.floor(cam.x), Math.floor(cam.y));
+  const z = D.zoneAt(Math.floor(player.x), Math.floor(player.y));
   const zid = z ? z.id : 'street';
   if (zid !== lastZoneId) {
     lastZoneId = zid;
@@ -220,6 +282,20 @@ function updatePlayer(dt) {
     banner.classList.remove('hidden');
     banner.style.animation = 'none'; void banner.offsetWidth; banner.style.animation = '';
   }
+}
+
+// 第三人称相机：玩家背后，逐步检测墙体收缩距离
+function wallAt(x, y) {
+  return !!(world.map[Math.floor(y)] && world.map[Math.floor(y)][Math.floor(x)]);
+}
+function cameraPos() {
+  if (viewMode === 'first') return { x: player.x, y: player.y };
+  const dirX = Math.cos(cam.a), dirY = Math.sin(cam.a);
+  let dist = 1.7;
+  for (let d = 0.3; d <= 1.7; d += 0.1) {
+    if (wallAt(player.x - dirX * d, player.y - dirY * d)) { dist = Math.max(0.35, d - 0.35); break; }
+  }
+  return { x: player.x - dirX * dist, y: player.y - dirY * dist };
 }
 
 function blocked(x, y) {
@@ -238,25 +314,31 @@ function blocked(x, y) {
 
 function updateNpcs(dt) {
   for (const nl of world.npcLive) {
-    if (nl.hidden) continue;
+    if (nl.hidden) { nl.moving = false; continue; }
+    if (nl.waving != null && nl.waving !== false) {
+      nl.waving -= dt;
+      if (nl.waving <= 0) nl.waving = false;
+    }
     nl.waitT -= dt;
-    if (nl.waitT > 0) continue;
+    if (nl.waitT > 0) { nl.moving = false; continue; }
     const dx = nl.tx - nl.x, dy = nl.ty - nl.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.15) {
       const r = zoneRectSafe(nl.zone);
       if (r) { const p = randInRect(r); nl.tx = p.x; nl.ty = p.y; }
       nl.waitT = 1.2 + Math.random() * 3;
+      nl.moving = false;
     } else {
       const sp = 0.55 * dt;
       nl.x += dx / d * sp; nl.y += dy / d * sp;
+      nl.moving = true;
+      nl.walkT = (nl.walkT || 0) + dt * 7;
     }
   }
 }
 
-function advanceTime(dt) {
-  const moving = keys['w'] || keys['s'] || keys['arrowup'] || keys['arrowdown'];
-  timeFrac += dt * (moving ? 16 : 6);
+function advanceTime(dt, moving, run) {
+  timeFrac += dt * (run ? 26 : moving ? 16 : 6);
   const m = Math.floor(timeFrac);
   if (m > 0) {
     timeFrac -= m;
@@ -294,7 +376,7 @@ function morningProcess(events) {
 
 // ---------- 交互检测 ----------
 function facingDot(nx, ny) {
-  const dx = nx - cam.x, dy = ny - cam.y;
+  const dx = nx - player.x, dy = ny - player.y;
   const d = Math.hypot(dx, dy) || 1;
   return (dx / d) * Math.cos(cam.a) + (dy / d) * Math.sin(cam.a);
 }
@@ -302,17 +384,17 @@ function findInteract() {
   let best = null, bestD = 1.6;
   for (const nl of world.npcLive) {
     if (nl.hidden) continue;
-    const d = Math.hypot(nl.x - cam.x, nl.y - cam.y);
+    const d = Math.hypot(nl.x - player.x, nl.y - player.y);
     if (d < bestD && facingDot(nl.x, nl.y) > 0.35) { best = { kind: 'npc', nl, d }; bestD = d; }
   }
   if (best) return best;
   for (const p of world.props) {
     if (!p.label) continue;
-    const d = Math.hypot(p.x - cam.x, p.y - cam.y);
+    const d = Math.hypot(p.x - player.x, p.y - player.y);
     if (d < 1.5 && facingDot(p.x, p.y) > 0.3) return { kind: 'station', p, d };
   }
   if (world.childLive) {
-    const d = Math.hypot(world.childLive.x - cam.x, world.childLive.y - cam.y);
+    const d = Math.hypot(world.childLive.x - player.x, world.childLive.y - player.y);
     if (d < 1.4 && facingDot(world.childLive.x, world.childLive.y) > 0.3) return { kind: 'child', d };
   }
   return null;
@@ -330,7 +412,8 @@ function updateInteractTip() {
 function tryInteract() {
   const it = findInteract();
   if (!it) return;
-  if (it.kind === 'npc') openDialog(it.nl);
+  waving = 0.55; // 玩家挥手动作
+  if (it.kind === 'npc') { it.nl.waving = 1.2; openDialog(it.nl); }
   else if (it.kind === 'child') {
     G.player.mood = Math.min(100, G.player.mood + 5);
     G.child.stats.happy = Math.min(100, G.child.stats.happy + 1);
@@ -925,6 +1008,7 @@ function updateHud() {
   $('hud-charm').textContent = G.player.charm;
   $('hud-talent').textContent = G.player.talent;
   $('hud-career').textContent = D.CAREERS[G.player.careerLevel].title;
+  $('hud-view').textContent = viewMode === 'third' ? '第三人称' : '第一人称';
   $('bar-energy').style.width = G.player.energy + '%';
   $('bar-mood').style.width = G.player.mood + '%';
 }
@@ -981,8 +1065,10 @@ function morningOf(r) { morningProcess(r.events); }
 // ---------- 测试/调试钩子 ----------
 window.__xd = {
   getG: () => G, getWorld: () => world,
-  cam: () => cam,
-  teleport: (x, y, a) => { cam.x = x; cam.y = y; if (a !== undefined) cam.a = a; },
+  cam: () => ({ x: player.x, y: player.y, a: cam.a, pitch: cam.pitch, viewMode }),
+  look: handleMouseLook,
+  setView: m => { viewMode = m; },
+  teleport: (x, y, a) => { player.x = x; player.y = y; if (a !== undefined) cam.a = a; },
   npc: id => world.npcLive.find(n => n.id === id),
   talkTo: id => { const nl = world.npcLive.find(n => n.id === id); if (nl) { nl.hidden = false; openDialog(nl); } },
   start: (name, gender) => startGame(name, gender),

@@ -95,19 +95,47 @@ function buildTextures() {
 }
 
 // ---------- 人物精灵 ----------
-function makePersonSprite(style) {
+// frame: 0 站立 | 1 迈步A | 2 迈步B | 'wave' 挥手
+function makePersonSprite(style, frame) {
   const w = 24, h = 48;
   const c = makeCanvas(w, h), ctx = c.getContext('2d');
   const { hair, hairStyle, skin, top, bottom } = style;
-  px(ctx, 5, 44, 6, 4, '#2b2b2b'); px(ctx, 13, 44, 6, 4, '#2b2b2b');       // 鞋
-  px(ctx, 6, 34, 5, 10, bottom); px(ctx, 13, 34, 5, 10, bottom);           // 腿
-  px(ctx, 4, 18, 16, 17, top);                                             // 身体
+  const f = frame || 0;
+  // 腿（迈步帧：前后错位）
+  if (f === 1) {
+    px(ctx, 5, 33, 5, 9, bottom); px(ctx, 14, 35, 5, 9, bottom);
+    px(ctx, 4, 42, 6, 4, '#2b2b2b'); px(ctx, 14, 44, 6, 4, '#2b2b2b');
+  } else if (f === 2) {
+    px(ctx, 14, 33, 5, 9, bottom); px(ctx, 5, 35, 5, 9, bottom);
+    px(ctx, 14, 42, 6, 4, '#2b2b2b'); px(ctx, 4, 44, 6, 4, '#2b2b2b');
+  } else {
+    px(ctx, 6, 34, 5, 10, bottom); px(ctx, 13, 34, 5, 10, bottom);
+    px(ctx, 5, 44, 6, 4, '#2b2b2b'); px(ctx, 13, 44, 6, 4, '#2b2b2b');
+  }
+  // 身体
+  px(ctx, 4, 18, 16, 17, top);
   px(ctx, 4, 18, 16, 2, 'rgba(255,255,255,.15)');
-  px(ctx, 2, 19, 3, 12, top); px(ctx, 19, 19, 3, 12, top);                 // 手臂
-  px(ctx, 2, 31, 3, 3, skin); px(ctx, 19, 31, 3, 3, skin);
-  px(ctx, 6, 4, 12, 12, skin);                                             // 头
+  // 手臂（迈步/挥手帧摆动）
+  if (f === 'wave') {
+    px(ctx, 2, 19, 3, 12, top);                       // 左臂自然
+    px(ctx, 18, 8, 3, 12, top); px(ctx, 18, 4, 3, 5, top);  // 右臂高举过头
+    px(ctx, 18, 2, 3, 3, skin);                       // 挥动的手
+    px(ctx, 2, 31, 3, 3, skin);
+  } else if (f === 1) {
+    px(ctx, 1, 18, 3, 11, top); px(ctx, 20, 21, 3, 11, top);
+    px(ctx, 1, 29, 3, 3, skin); px(ctx, 20, 32, 3, 3, skin);
+  } else if (f === 2) {
+    px(ctx, 20, 18, 3, 11, top); px(ctx, 1, 21, 3, 11, top);
+    px(ctx, 20, 29, 3, 3, skin); px(ctx, 1, 32, 3, 3, skin);
+  } else {
+    px(ctx, 2, 19, 3, 12, top); px(ctx, 19, 19, 3, 12, top);
+    px(ctx, 2, 31, 3, 3, skin); px(ctx, 19, 31, 3, 3, skin);
+  }
+  // 头
+  px(ctx, 6, 4, 12, 12, skin);
   px(ctx, 7, 6, 2, 2, '#2b2b2b'); px(ctx, 15, 6, 2, 2, '#2b2b2b');         // 眼
-  px(ctx, 9, 11, 6, 1, '#c96a6a');                                         // 嘴
+  px(ctx, 9, 11, 6, 1, '#c96a6a');                                          // 嘴
+  // 发型
   if (hairStyle === 'long') { px(ctx, 5, 2, 14, 10, hair); px(ctx, 4, 8, 3, 22, hair); px(ctx, 17, 8, 3, 22, hair); }
   else if (hairStyle === 'short') { px(ctx, 5, 3, 14, 7, hair); px(ctx, 5, 9, 2, 3, hair); px(ctx, 17, 9, 2, 3, hair); }
   else if (hairStyle === 'ponytail') { px(ctx, 5, 3, 14, 7, hair); px(ctx, 17, 6, 4, 14, hair); }
@@ -263,20 +291,22 @@ let TEXTURES = null;
 let frame = null, buf32 = null;
 const zbuffer = new Float32Array(RENDER_W);
 
-function renderScene(ctx, world, cam, minutes) {
+function renderScene(ctx, world, cam, minutes, opts) {
   if (!TEXTURES) TEXTURES = buildTextures();
-  const W = RENDER_W, H = RENDER_H, horizon = H >> 1;
+  const W = RENDER_W, H = RENDER_H;
+  const pitch = (opts && opts.pitch) ? Math.max(-90, Math.min(90, opts.pitch)) : 0;
+  const horizon = Math.max(36, Math.min(H - 36, (H >> 1) + pitch));
   if (!frame) { frame = ctx.createImageData(W, H); buf32 = new Uint32Array(frame.data.buffer); }
   const pal = dayPalette(minutes);
   const MAP = world.map;
 
-  // 天空与地面（逐行渐变）
+  // 天空与地面（逐行渐变，按 pitch 偏移的地平线）
   const gTop = mixRGB(pal.sky1, pal.sky2, 0), gBot = mixRGB(pal.sky1, pal.sky2, 1);
   const grA = pal.ground, grB = [pal.ground[0] * 0.6, pal.ground[1] * 0.6, pal.ground[2] * 0.6];
   for (let y = 0; y < H; y++) {
     let col;
-    if (y < horizon) { const t = y / horizon; col = packRGB(gTop[0] + (gBot[0] - gTop[0]) * t, gTop[1] + (gBot[1] - gTop[1]) * t, gTop[2] + (gBot[2] - gTop[2]) * t); }
-    else { const t = (y - horizon) / (H - horizon); col = packRGB(grA[0] + (grB[0] - grA[0]) * t, grA[1] + (grB[1] - grA[1]) * t, grA[2] + (grB[2] - grA[2]) * t); }
+    if (y < horizon) { const t = Math.max(0, y / Math.max(1, horizon)); col = packRGB(gTop[0] + (gBot[0] - gTop[0]) * t, gTop[1] + (gBot[1] - gTop[1]) * t, gTop[2] + (gBot[2] - gTop[2]) * t); }
+    else { const t = (y - horizon) / Math.max(1, H - horizon); col = packRGB(grA[0] + (grB[0] - grA[0]) * t, grA[1] + (grB[1] - grA[1]) * t, grA[2] + (grB[2] - grA[2]) * t); }
     buf32.fill(col, y * W, (y + 1) * W);
   }
 
@@ -323,12 +353,18 @@ function renderScene(ctx, world, cam, minutes) {
   }
   ctx.putImageData(frame, 0, 0);
 
-  // 精灵（NPC + 道具）
+  // 精灵（NPC + 道具 + 第三人称玩家）
   const sprites = [];
   for (const p of world.props) sprites.push({ x: p.x, y: p.y, img: getPropImg(p.type), isProp: true });
   for (const n of world.npcLive) {
     if (n.hidden) continue;
-    sprites.push({ x: n.x, y: n.y, img: n.img, name: n.name, isProp: false });
+    const frameIdx = n.moving ? [0, 1, 0, 2][Math.floor(n.walkT || 0) % 4] : 0;
+    const img = n.waving ? n.imgs[n.imgs.length - 1] : n.imgs[frameIdx];
+    sprites.push({ x: n.x, y: n.y, img, name: n.name, isProp: false });
+  }
+  if (opts && opts.playerSprite) {
+    const ps = opts.playerSprite;
+    sprites.push({ x: ps.x, y: ps.y, img: ps.img, name: null, isProp: true, isPlayer: true });
   }
   const invDet = 1 / (planeX * dirY - dirX * planeY);
   for (const s of sprites) s.dist = (s.x - cam.x) * (s.x - cam.x) + (s.y - cam.y) * (s.y - cam.y);
@@ -355,7 +391,7 @@ function renderScene(ctx, world, cam, minutes) {
       ctx.fillStyle = `rgba(10,14,40,${(1 - pal.amb) * 0.5})`;
       ctx.fillRect(x0, y0, spriteW, spriteH);
     }
-    if (!s.isProp && ty < 3.5) {
+    if (!s.isProp && !s.isPlayer && ty < 3.5) {
       ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(0,0,0,.5)';
       ctx.fillRect(screenX - 32, y0 - 16, 64, 13);
@@ -387,7 +423,7 @@ function buildMinimap(map) {
   }
   return c;
 }
-function renderMinimap(ctx, world, cam) {
+function renderMinimap(ctx, world, player, cam) {
   if (!minimapBase) minimapBase = buildMinimap(world.map);
   const S = 4;
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -402,7 +438,7 @@ function renderMinimap(ctx, world, cam) {
     ctx.fillRect(world.childLive.x * S - 1.5, world.childLive.y * S - 1.5, 3, 3);
   }
   ctx.save();
-  ctx.translate(cam.x * S, cam.y * S);
+  ctx.translate(player.x * S, player.y * S);
   ctx.rotate(cam.a);
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-3, -2.6); ctx.lineTo(-3, 2.6); ctx.closePath(); ctx.fill();
